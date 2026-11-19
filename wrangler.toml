@@ -1,0 +1,13 @@
+# Cloudflare Pages config for the live demo.
+# The demo is a single static page (docs/index.html) with no build step —
+# Cloudflare serves the output directory as-is at https://<name>.pages.dev.
+#
+# Dashboard setup (Workers & Pages → Create → Pages → Connect to Git):
+#   Framework preset:        None
+#   Build command:           (leave empty)
+#   Build output directory:  docs
+# With this file present, Cloudflare auto-detects the output directory below.
+# `name` must match the Pages project / subdomain you create.
+
+name = "rental-smart-contracts"
+pages_build_output_dir = "docs"
