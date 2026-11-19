@@ -85,6 +85,9 @@
   .prop .loc{color:var(--muted); font-size:13px}
   .prop .rate{margin-top:6px; font-size:14px}
   .prop .rate b{font-size:18px}
+  .tpl{border:1px solid var(--line); border-radius:12px; padding:14px; background:var(--panel-2)}
+  .tpl .prop{margin-bottom:8px}
+  .tpl .kv{padding:7px 0}
 
   label.fld{display:block; font-size:12.5px; font-weight:600; color:var(--muted); margin:0 0 6px}
   select,input[type="number"],input[type="text"]{
@@ -166,8 +169,8 @@
 
   <!-- TEMPLATE -->
   <section class="card">
-    <div class="hd"><h2>Rental template</h2><span class="spacer"></span><span class="sub">terms applied to every rental</span></div>
-    <div class="bd" id="tplBody"><div class="skel">Loading template…</div></div>
+    <div class="hd"><h2>Rental templates</h2><span class="spacer"></span><span class="sub">terms per category</span></div>
+    <div class="bd" id="tplBody"><div class="skel">Loading templates…</div></div>
   </section>
 
   <!-- QUOTE + RENT -->
@@ -261,7 +264,8 @@ const bps = (v) => (Number(v)/100) + "%";
 
 let provider, factory, feed;
 let ethUsd = null;           // number, USD per ETH
-let state = { props:[], template:null };
+let state = { props:[], templates:{} };
+const catIcon = (c) => ({property:"🏠",vehicle:"🚗",yacht:"⛵"}[c] || "📄");
 let signer = null, account = null;
 
 /* ---------- theme ---------- */
@@ -323,26 +327,46 @@ async function loadOverview(){
   return { tCount:Number(tCount), pCount:Number(pCount) };
 }
 
-function paintTemplate(t){
-  state.template = t;
-  $("tplBody").innerHTML = `
-    <div class="prop" style="margin-bottom:14px">
-      <span class="nm">${esc(t.name)} <span class="pill">${esc(t.category)}</span></span>
-    </div>
-    <div class="grid three">
-      <div class="kv"><span class="k">Security deposit</span><span class="v">${bps(t.securityDepositBps)}</span></div>
+function paintTemplates(list){
+  $("tplBody").innerHTML = `<div class="grid three">` + list.map(t => `
+    <div class="tpl">
+      <div class="prop">
+        <span class="nm">${catIcon(t.category)} ${esc(t.name)}</span>
+        <span class="loc">${esc(t.category)} · ${Number(t.minDuration)/86400}–${Number(t.maxDuration)/86400} days</span>
+      </div>
+      <div class="kv"><span class="k">Deposit</span><span class="v">${bps(t.securityDepositBps)}</span></div>
       <div class="kv"><span class="k">Late fee / day</span><span class="v">${bps(t.lateFeeBps)}</span></div>
-      <div class="kv"><span class="k">Cancellation fee</span><span class="v">${bps(t.cancellationFeeBps)}</span></div>
-      <div class="kv"><span class="k">Min length</span><span class="v">${Number(t.minDuration)/86400} days</span></div>
-      <div class="kv"><span class="k">Max length</span><span class="v">${Number(t.maxDuration)/86400} days</span></div>
-      <div class="kv"><span class="k">Early termination</span><span class="v">${t.allowsEarlyTermination?"allowed":"no"}</span></div>
-    </div>`;
+      <div class="kv"><span class="k">Cancellation</span><span class="v">${bps(t.cancellationFeeBps)}</span></div>
+      <div class="kv"><span class="k">Early exit</span><span class="v">${t.allowsEarlyTermination?"yes":"no"}</span></div>
+    </div>`).join("") + `</div>`;
+}
+
+function syncSliderToProp(){
+  const p = currentProp();
+  if (!p) return;
+  const t = state.templates[Number(p.templateId)];
+  if (!t) return;
+  const slider = $("daysIn");
+  const min = Math.max(1, Number(t.minDuration)/86400);
+  const max = Math.min(Number(t.maxDuration)/86400, 60); // cap UI at 60 days
+  slider.min = String(min);
+  slider.max = String(max);
+  let v = Number(slider.value);
+  if (v < min) v = min;
+  if (v > max) v = max;
+  slider.value = String(v);
+  $("daysLbl").textContent = slider.value;
 }
 
 async function loadTemplatesAndProps(counts){
   if (counts.tCount >= 1){
-    const t = await factory.rentalTemplates(1);
-    paintTemplate(t);
+    const list = [];
+    for (let id=1; id<=counts.tCount; id++){
+      const t = await factory.rentalTemplates(id);
+      state.templates[id] = t;
+      list.push(t);
+    }
+    paintTemplates(list);
   } else {
     $("tplBody").innerHTML = `<div class="skel">No templates registered yet.</div>`;
   }
@@ -360,8 +384,9 @@ async function loadTemplatesAndProps(counts){
   }
   state.props = props;
   sel.innerHTML = props.map(p =>
-    `<option value="${p.id}">${esc(p.name)} — ${esc(p.location)} (${fmtEth(p.dailyRate)} ETH/day)</option>`
+    `<option value="${p.id}">${catIcon(p.category)} ${esc(p.name)} — ${esc(p.location)} (${fmtEth(p.dailyRate)} ETH/day)</option>`
   ).join("");
+  syncSliderToProp();
   refreshQuote();
 }
 
@@ -389,7 +414,7 @@ async function refreshQuote(){
     const total = q.totalRent + q.securityDeposit + q.platformFee;
     $("qTot").textContent  = fmtEth(total); $("qTotU").textContent = usd(total);
     $("quoteOut").style.display = "";
-    $("quoteNote").innerHTML = `Live from <code>quote()</code> on the factory. The deposit is held in escrow and returned at settlement minus any approved deductions.`;
+    $("quoteNote").innerHTML = `Live from <code>quote()</code> on the factory — priced on the <b>${esc(p.category)}</b> template. The deposit is held in escrow and returned at settlement minus any approved deductions.`;
     // stash for the rent tx
     state.pending = { propertyId:p.id, start, end, value: total };
     updateRentBtn();
@@ -484,7 +509,7 @@ async function boot(){
   paintLinks();
   $("connectBtn").onclick = connectWallet;
   $("rentBtn").onclick = rent;
-  $("propSel").onchange = refreshQuote;
+  $("propSel").onchange = () => { syncSliderToProp(); refreshQuote(); };
   $("daysIn").oninput = () => { $("daysLbl").textContent = $("daysIn").value; scheduleQuote(); };
 
   try{
