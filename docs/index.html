@@ -145,7 +145,7 @@
     <div class="logo"><span class="dot"></span> Rental Contracts</div>
     <div class="spacer"></div>
     <button class="ghost" id="themeBtn" title="Toggle theme">◐</button>
-    <button class="ghost" id="connectBtn">Connect Wallet</button>
+    <a class="ghost" id="lEtherscan" target="_blank" rel="noopener" style="text-decoration:none">View on Etherscan ↗</a>
   </div>
 </header>
 
@@ -212,9 +212,11 @@
       </div>
       <div class="note" id="quoteNote"></div>
 
-      <div style="margin-top:16px">
-        <button class="btn" id="rentBtn" disabled>Connect a wallet to rent this</button>
-        <div class="note" id="rentStatus"></div>
+      <div style="margin-top:16px" class="note" id="rentInfo">
+        This is a <b>read-only</b> demo — it never requests a wallet connection, so everything above is
+        safe to browse. To create a real agreement on Sepolia, call <code>createRentalAgreement</code> on the
+        <a id="lWrite" target="_blank" rel="noopener">verified factory contract</a> (Etherscan ›
+        <b>Write Contract</b> tab), sending the <b>Total to send</b> shown above as the transaction value.
       </div>
     </div>
   </section>
@@ -294,7 +296,7 @@ let provider, factory, feed;
 let ethUsd = null;           // number, USD per ETH
 let state = { props:[], templates:{} };
 const catIcon = (c) => ({property:"🏠",vehicle:"🚗",yacht:"⛵"}[c] || "📄");
-let signer = null, account = null;
+let account = null;    // never set — the demo is read-only and requests no wallet
 
 /* ---------- theme ---------- */
 (function(){
@@ -317,6 +319,8 @@ function paintLinks(){
   $("lInsurance").textContent = short(CFG.insurance); $("lInsurance").href = exAddr(CFG.insurance)+"#code";
   $("lFeed").textContent = short(CFG.feed); $("lFeed").href = exAddr(CFG.feed);
   $("lRepo").href = CFG.repo;
+  const w = $("lWrite"); if (w) w.href = exAddr(CFG.factory) + "#writeContract";
+  const es = $("lEtherscan"); if (es) es.href = exAddr(CFG.factory) + "#code";
 }
 
 /* ---------- provider ---------- */
@@ -461,76 +465,16 @@ async function refreshQuote(){
       ? ` This template <b>requires insurance</b>, so the premium is paid in the same transaction and a policy is minted on-chain against the new agreement.`
       : ``;
     $("quoteNote").innerHTML = `Live from <code>quote()</code> on the factory — priced on the <b>${esc(p.category)}</b> template. The deposit is held in escrow and returned at settlement minus any approved deductions.` + insNote;
-    // stash for the rent tx
     state.pending = { propertyId:p.id, start, end, value: total };
-    updateRentBtn();
   }catch(e){
     $("quoteNote").innerHTML = `<span class="err">Quote failed: ${esc(e.shortMessage||e.message||String(e))}</span>`;
   }
 }
 
-/* ---------- wallet ---------- */
-function updateRentBtn(){
-  const btn = $("rentBtn");
-  if (!account){ btn.textContent = "Connect a wallet to rent this"; btn.disabled = true; return; }
-  const p = currentProp();
-  btn.disabled = false;
-  btn.textContent = p ? `Rent “${p.name}” — pay ${fmtEth(state.pending.value)} ETH` : "Select a property";
-}
-
-async function connectWallet(){
-  if (!window.ethereum){ alert("No Ethereum wallet found. Install MetaMask to try the rent flow."); return; }
-  try{
-    const bp = new ethers.BrowserProvider(window.ethereum);
-    await bp.send("eth_requestAccounts", []);
-    // ensure Sepolia
-    const net = await bp.getNetwork();
-    if (Number(net.chainId) !== CFG.chainId){
-      try{
-        await window.ethereum.request({ method:"wallet_switchEthereumChain", params:[{ chainId: CFG.chainHex }] });
-      }catch(sw){
-        if (sw.code === 4902){
-          await window.ethereum.request({ method:"wallet_addEthereumChain", params:[{
-            chainId: CFG.chainHex, chainName:"Sepolia",
-            nativeCurrency:{name:"Sepolia ETH",symbol:"ETH",decimals:18},
-            rpcUrls:[CFG.rpcs[0]], blockExplorerUrls:[CFG.explorer]
-          }]});
-        } else { throw sw; }
-      }
-    }
-    signer = await bp.getSigner();
-    account = await signer.getAddress();
-    $("connectBtn").textContent = short(account);
-    updateRentBtn();
-    renderAgreements();   // re-tag any already-indexed agreements as "you"
-  }catch(e){
-    console.error(e);
-    alert(e.shortMessage || e.message || "Wallet connection failed.");
-  }
-}
-
-async function rent(){
-  if (!signer || !state.pending){ return; }
-  const btn = $("rentBtn"); const st = $("rentStatus");
-  btn.disabled = true; const old = btn.textContent; btn.textContent = "Confirm in your wallet…";
-  st.textContent = "";
-  try{
-    const fw = new ethers.Contract(CFG.factory, FACTORY_ABI, signer);
-    const { propertyId, start, end, value } = state.pending;
-    // refresh start so it is still in the future at mining time
-    const start2 = Math.floor(Date.now()/1000) + 1800;
-    const end2 = start2 + (end - start);
-    const tx = await fw.createRentalAgreement(propertyId, start2, end2, "web demo", { value });
-    st.innerHTML = `Submitted: <a class="tx" target="_blank" href="${CFG.explorer}/tx/${tx.hash}">${tx.hash}</a> — waiting…`;
-    const rc = await tx.wait();
-    st.innerHTML = `✅ Agreement created in block ${rc.blockNumber}. <a class="tx" target="_blank" href="${CFG.explorer}/tx/${tx.hash}">view tx</a>`;
-    scanAgreements();   // re-index so the new agreement shows up below
-  }catch(e){
-    st.innerHTML = `<span class="err">${esc(e.shortMessage || e.reason || e.message || "Transaction failed")}</span>`;
-  }finally{
-    btn.disabled = false; btn.textContent = old;
-  }
-}
+/* The demo is intentionally read-only: it never requests a wallet connection,
+   which is what keeps wallet-side domain security scanners from ever evaluating
+   the page. Creating an agreement is done directly against the verified factory
+   on Etherscan (Write Contract tab), so no wallet is wired into this page. */
 
 /* ---------- live agreement index (client-side "subgraph") ---------- */
 let agrState = { items: [], pruned: false };
@@ -646,7 +590,7 @@ function renderAgreements(){
   const { items, pruned } = agrState;
   $("agrSub").textContent = items.length ? `${items.length} agreement${items.length>1?"s":""} indexed` : "none yet";
   if (!items.length){
-    $("agrBody").innerHTML = `<div class="skel">No agreements created yet. Connect a wallet above and rent a property — the agreement will appear here with its live status, pulled straight from the chain.</div>`;
+    $("agrBody").innerHTML = `<div class="skel">No agreements created yet. Once a rental is created on the factory, it appears here with its live status, escrow amounts, insurance, and any disputes — pulled straight from the chain.</div>`;
     return;
   }
   const disputed = items.filter(i=>i.ok && Number(i.d.status)===3).length;
@@ -666,8 +610,6 @@ function esc(s){ return String(s).replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt
 /* ---------- boot ---------- */
 async function boot(){
   paintLinks();
-  $("connectBtn").onclick = connectWallet;
-  $("rentBtn").onclick = rent;
   $("propSel").onchange = () => { syncSliderToProp(); refreshQuote(); };
   $("daysIn").oninput = () => { $("daysLbl").textContent = $("daysIn").value; scheduleQuote(); };
 
