@@ -36,6 +36,7 @@ contract PropertyRentalAgreement is RentalAgreement {
     }
 
     PropertySpec public spec;
+    bool private _specSet;
     MaintenanceRequest[] public maintenanceRequests;
     InspectionReport[] public inspectionReports;
 
@@ -49,9 +50,18 @@ contract PropertyRentalAgreement is RentalAgreement {
     event UtilityReadingUpdated(string utilityType, uint256 reading);
     event OccupantAuthorized(address indexed occupant, bool authorized);
 
-    constructor(RentalInit memory init, PropertySpec memory _spec) RentalAgreement(init) {
-        spec = _spec;
+    /// @notice Clone initializer (replaces the constructor). Called once by the
+    ///         factory right after cloning this implementation.
+    function initialize(RentalInit memory init) public override initializer {
+        __RentalAgreement_init(init);
         authorizedOccupants[init.tenant] = true;
+    }
+
+    /// @notice Landlord sets the property specification once, after creation.
+    function configureProperty(PropertySpec calldata _spec) external onlyLandlord {
+        require(!_specSet, "already configured");
+        _specSet = true;
+        spec = _spec;
     }
 
     function requestMaintenance(

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IAggregatorV3} from "./interfaces/IAggregatorV3.sol";
@@ -32,7 +33,7 @@ struct RentalInit {
 /// @dev Payments use the pull-over-push pattern: funds are credited to an
 ///      internal ledger and the recipient withdraws them, so a reverting or
 ///      gas-griefing recipient can never block another party's funds.
-contract RentalAgreement is ReentrancyGuard, Pausable {
+contract RentalAgreement is Initializable, ReentrancyGuard, Pausable {
     uint256 internal constant BPS = 10_000;
     uint256 internal constant DISPUTE_WINDOW = 7 days;
     uint256 internal constant DEPOSIT_GRACE = 1 days;
@@ -88,9 +89,11 @@ contract RentalAgreement is ReentrancyGuard, Pausable {
     Payment[] public payments;
     Deduction[] public deductions;
 
-    address public immutable factory;
-    address public immutable platformTreasury;
-    IAggregatorV3 public immutable ethUsdPriceFeed;
+    // Set once in initialize(): these are per-clone storage, not immutables,
+    // because EIP-1167 clones run no constructor and cannot carry immutables.
+    address public factory;
+    address public platformTreasury;
+    IAggregatorV3 public ethUsdPriceFeed;
 
     uint256 public securityDepositHeld;
     uint256 public securityDepositDeducted;
@@ -131,7 +134,22 @@ contract RentalAgreement is ReentrancyGuard, Pausable {
         _;
     }
 
-    constructor(RentalInit memory init) {
+    /// @dev Locks the implementation contract so only clones (which start with
+    ///      fresh storage) can be initialized — the implementation itself can't.
+    constructor() {
+        _disableInitializers();
+    }
+
+    /// @notice Initialize a freshly-deployed clone. Called once by the factory
+    ///         immediately after cloning, in the same transaction as funding.
+    /// @dev Replaces the old constructor so the contract is EIP-1167 clonable.
+    ///      Subclasses override this to add category-specific setup, calling
+    ///      {__RentalAgreement_init} for the shared base state.
+    function initialize(RentalInit memory init) public virtual initializer {
+        __RentalAgreement_init(init);
+    }
+
+    function __RentalAgreement_init(RentalInit memory init) internal onlyInitializing {
         require(init.landlord != address(0) && init.tenant != address(0), "zero party");
         require(init.endTime > init.startTime, "bad window");
         require(init.cancellationFeeBps <= BPS, "bad cancel bps");

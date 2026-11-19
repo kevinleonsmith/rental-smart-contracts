@@ -46,6 +46,7 @@ contract YachtRentalAgreement is RentalAgreement {
 
     NavigationLimits public navigationLimits;
     SafetyRequirements public safetyRequirements;
+    bool private _configured;
     UsageLog[] public usageLogs;
     DamageReport[] public damageReports;
 
@@ -53,11 +54,19 @@ contract YachtRentalAgreement is RentalAgreement {
     event SafetyViolation(string reason);
     event DamageReported(uint256 indexed reportId, string category, uint256 estimatedCost);
 
-    constructor(
-        RentalInit memory init,
-        NavigationLimits memory _nav,
-        SafetyRequirements memory _safety
-    ) RentalAgreement(init) {
+    /// @notice Clone initializer (replaces the constructor). Called once by the
+    ///         factory right after cloning this implementation.
+    function initialize(RentalInit memory init) public override initializer {
+        __RentalAgreement_init(init);
+    }
+
+    /// @notice Landlord sets the navigation and safety limits once, after creation.
+    function configureYacht(
+        NavigationLimits calldata _nav,
+        SafetyRequirements calldata _safety
+    ) external onlyLandlord {
+        require(!_configured, "already configured");
+        _configured = true;
         navigationLimits = _nav;
         safetyRequirements = _safety;
     }

@@ -68,13 +68,21 @@ The draft specialized contracts called *back into the factory* (`factory.platfor
 - Replaced the heavyweight `@chainlink/contracts` + `ChainlinkClient` dependency with a 15-line local `IAggregatorV3` interface and a mock, keeping the price-feed feature with zero external dependency.
 - Unified pragmas (the drafts mixed `0.8.19` and `0.8.30`), custom errors instead of revert strings on the hot paths, checks-effects-interactions throughout, `nonReentrant` on every value-moving function.
 
+### Per-category agreements via minimal-proxy clones
+The factory keeps a registry mapping each template `category` → an agreement **implementation** (`property` → `PropertyRentalAgreement`, `vehicle` → `VehicleRentalAgreement`, `yacht` → `YachtRentalAgreement`, with a base fallback). Creating a rental deploys an **EIP-1167 minimal-proxy clone** of the right implementation and `initialize()`s + funds it in the same transaction — so each category gets its specialised logic (mileage charges, usage logs, inspections) while deploy gas stays flat and small no matter how large the implementations grow.
+
+Because clones run no constructor, the contracts were moved to an OpenZeppelin `Initializable` `initialize()` pattern: immutables became storage set on init, inline field initializers (which run in the constructor) moved into `initialize()`, and each implementation locks itself with `_disableInitializers()` so only clones — never the implementation — can be initialized. Initialize + fund happen atomically inside the factory call, so there is no window to front-run initialization.
+
+> The **live Sepolia** deployment above still runs the earlier (pre-clone) factory; this clone architecture is in the codebase and covered by tests. Redeploying to put it on-chain is the next step, not a code change.
+
 ---
 
 ## Architecture
 
 ```
-RentalAgreementFactory ── registry of templates + properties; deploys & funds agreements; takes platform fee
-        │  new + fundInitial()
+RentalAgreementFactory ── registry of templates + properties + per-category implementations;
+        │                   clones the right agreement, funds it, takes platform fee
+        │  clone + initialize() + fundInitial()
         ▼
 RentalAgreement ──────── per-rental escrow: rent payout, deposit custody, deductions, disputes, pull withdrawals
         ▲ inherits
@@ -110,7 +118,7 @@ RentalInsuranceManager ─ optional policies, claims, pool-funded pull settlemen
 
 Honest view of what's done and what's next:
 
-- **Category-specific escrow at deploy time.** The live factory currently instantiates the base `RentalAgreement` for every category. The `Vehicle`/`Yacht`/`Property` subclasses (with their mileage/fuel, usage-log, and inspection logic) exist and are unit-tested, but aren't yet the contracts the factory deploys. Next step: have the factory select the right subclass by the template's `category` — likely via a registry of per-category implementation addresses plus minimal-proxy (EIP-1167) clones, to keep deploy gas flat as the contracts grow.
+- ✅ **Category-specific escrow at deploy time** *(done)*. The factory selects the agreement implementation by the template's `category` and deploys it as an EIP-1167 clone — see [Per-category agreements via minimal-proxy clones](#per-category-agreements-via-minimal-proxy-clones). The one remaining piece is redeploying so the **live** factory runs it (the current Sepolia factory predates this).
 - **Contested-claim arbitration.** Deposit deductions are trust-minimized today (tenant consent or a timeout). A production system would add a neutral arbiter or an escrow-oracle path for disputed claims.
 - **Insurance wired into the rental flow.** `RentalInsuranceManager` is standalone; a template that `requiresInsurance` could mint/attach a policy as part of `createRentalAgreement`.
 - **Subgraph + richer frontend.** Index `AgreementCreated` events so the demo lists real agreements and their lifecycle, rather than reading one address at a time.

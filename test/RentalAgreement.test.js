@@ -238,35 +238,82 @@ describe("RentalAgreement — pull payments & deposit", () => {
   });
 });
 
-describe("VehicleRentalAgreement — excess mileage", () => {
+describe("Factory clones & implementation registry", () => {
+  it("deploys agreements as minimal-proxy clones of the default implementation", async () => {
+    const { factory, tenant } = await deployFactoryFixture();
+    const { agreement } = await createAgreement(factory, tenant);
+
+    expect(await factory.defaultImplementation()).to.not.equal(ethers.ZeroAddress);
+    // An EIP-1167 clone's runtime code is ~45 bytes, far smaller than the impl.
+    const code = await ethers.provider.getCode(await agreement.getAddress());
+    expect(ethers.dataLength(code)).to.be.lessThan(100);
+  });
+
+  it("only the owner can register a category implementation", async () => {
+    const { factory, other } = await deployFactoryFixture();
+    const V = await ethers.getContractFactory("VehicleRentalAgreement");
+    const impl = await V.deploy();
+    await expect(
+      factory.connect(other).setImplementation("vehicle", await impl.getAddress())
+    ).to.be.revertedWithCustomError(factory, "OwnableUnauthorizedAccount");
+  });
+
+  it("the locked implementation cannot be initialized directly", async () => {
+    const V = await ethers.getContractFactory("VehicleRentalAgreement");
+    const impl = await V.deploy();
+    const init = {
+      landlord: ethers.ZeroAddress, tenant: ethers.ZeroAddress, propertyId: 0, templateId: 0,
+      startTime: 0, endTime: 1, totalRent: 0, securityDeposit: 0, platformFee: 0,
+      cancellationFeeBps: 0, allowsEarlyTermination: false,
+      platformTreasury: ethers.ZeroAddress, priceFeed: ethers.ZeroAddress, tenantDetails: "",
+    };
+    await expect(impl.initialize(init)).to.be.revertedWithCustomError(impl, "InvalidInitialization");
+  });
+});
+
+describe("VehicleRentalAgreement — excess mileage (via factory clone)", () => {
   async function deployVehicle() {
-    const [deployer, landlord, tenant, treasury] = await ethers.getSigners();
+    const [deployer, landlord, tenant, treasury, other] = await ethers.getSigners();
     const Mock = await ethers.getContractFactory("MockV3Aggregator");
     const feed = await Mock.deploy(8, 2000_00000000n);
 
-    const start = (await time.latest()) + 100;
-    const end = start + 5 * DAY;
-    const rent = ethers.parseEther("5");
-    const deposit = ethers.parseEther("2");
-    const fee = ethers.parseEther("0");
+    const Factory = await ethers.getContractFactory("RentalAgreementFactory");
+    const factory = await Factory.deploy(await feed.getAddress(), treasury.address);
 
-    const init = {
-      landlord: landlord.address,
-      tenant: tenant.address,
-      propertyId: 1,
-      templateId: 1,
-      startTime: start,
-      endTime: end,
-      totalRent: rent,
-      securityDeposit: deposit,
-      platformFee: fee,
-      cancellationFeeBps: 0,
-      allowsEarlyTermination: true,
-      platformTreasury: treasury.address,
-      priceFeed: await feed.getAddress(),
-      tenantDetails: "driver",
-    };
-    const vehicle = {
+    // Register the vehicle implementation for the "vehicle" category.
+    const V = await ethers.getContractFactory("VehicleRentalAgreement");
+    const vehicleImpl = await V.deploy();
+    await factory.setImplementation("vehicle", await vehicleImpl.getAddress());
+    await factory.updatePlatformFee(0); // clean arithmetic
+
+    // 40% deposit, 1–30 day window. duration 4 days -> rentalDays 5 -> rent 5 ETH, deposit 2 ETH.
+    await factory.createRentalTemplate("Car", "vehicle", 1 * DAY, 30 * DAY, 4000n, LATE_BPS, 0, true, true);
+    const dailyRate = ethers.parseEther("1");
+    await factory
+      .connect(landlord)
+      .registerProperty("Car #1", "vehicle", "LA", dailyRate, 1, "ipfs://meta");
+
+    const start = (await time.latest()) + 100;
+    const end = start + 4 * DAY;
+    const [rent, deposit, fee] = await factory.quote(1, start, end);
+    const required = rent + deposit + fee;
+    const tx = await factory.connect(tenant).createRentalAgreement(1, start, end, "driver", {
+      value: required,
+    });
+    const receipt = await tx.wait();
+    const ev = receipt.logs
+      .map((l) => {
+        try {
+          return factory.interface.parseLog(l);
+        } catch {
+          return null;
+        }
+      })
+      .find((e) => e && e.name === "AgreementCreated");
+    const car = await ethers.getContractAt("VehicleRentalAgreement", ev.args.agreement);
+
+    // Landlord configures the vehicle spec after creation (one-time).
+    await car.connect(landlord).configureVehicle({
       make: "Tesla",
       model: "Model 3",
       year: 2024,
@@ -275,13 +322,31 @@ describe("VehicleRentalAgreement — excess mileage", () => {
       mileageLimit: 500,
       cdwIncluded: true,
       fuelPolicyType: 0,
-    };
+    });
 
-    const V = await ethers.getContractFactory("VehicleRentalAgreement");
-    const car = await V.connect(deployer).deploy(init, vehicle); // deployer == factory
-    await car.connect(deployer).fundInitial({ value: rent + deposit + fee });
-    return { car, deployer, landlord, tenant, deposit };
+    return { factory, car, deployer, landlord, tenant, other, deposit };
   }
+
+  it("initializes fee fields in the clone (inline initializers don't run in clones)", async () => {
+    const { car } = await deployVehicle();
+    expect(await car.mileageExcessFeeWei()).to.equal(ethers.parseEther("0.00025"));
+    expect(await car.refuelingFeeWei()).to.equal(ethers.parseEther("0.02"));
+  });
+
+  it("configures the vehicle spec only once, by the landlord", async () => {
+    const { car, landlord, other } = await deployVehicle();
+    const spec = {
+      make: "x", model: "y", year: 2020, vin: "v", licensePlate: "p",
+      mileageLimit: 1, cdwIncluded: false, fuelPolicyType: 0,
+    };
+    await expect(car.connect(other).configureVehicle(spec)).to.be.revertedWithCustomError(
+      car,
+      "NotLandlord"
+    );
+    await expect(car.connect(landlord).configureVehicle(spec)).to.be.revertedWith(
+      "already configured"
+    );
+  });
 
   it("deducts an excess-mileage fee from the deposit and credits the landlord", async () => {
     const { car, landlord, deposit } = await deployVehicle();

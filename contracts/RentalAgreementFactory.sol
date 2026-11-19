@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {RentalAgreement, RentalInit} from "./RentalAgreement.sol";
 
 /// @title RentalAgreementFactory
@@ -50,6 +51,12 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
     address public platformTreasury;
     address public immutable priceFeed;
 
+    /// @notice Per-category agreement implementation to clone (EIP-1167).
+    ///         e.g. "vehicle" => VehicleRentalAgreement implementation address.
+    mapping(string => address) public implementationOf;
+    /// @notice Fallback implementation cloned when a category has none registered.
+    address public defaultImplementation;
+
     event TemplateCreated(uint256 indexed templateId, string name, string category);
     event PropertyRegistered(uint256 indexed propertyId, address indexed owner, string name);
     event AgreementCreated(
@@ -60,6 +67,8 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
     );
     event PlatformFeeUpdated(uint256 newBps);
     event TreasuryUpdated(address treasury);
+    event ImplementationSet(string category, address implementation);
+    event DefaultImplementationSet(address implementation);
 
     error InvalidTemplate();
     error InvalidProperty();
@@ -70,6 +79,36 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
         require(_platformTreasury != address(0), "zero treasury");
         priceFeed = _priceFeed;
         platformTreasury = _platformTreasury;
+        // Deploy a base implementation so every category has a working default
+        // to clone out of the box; category-specific impls can be registered later.
+        defaultImplementation = address(new RentalAgreement());
+        emit DefaultImplementationSet(defaultImplementation);
+    }
+
+    // --------------------------------------------------------------------- //
+    //                       implementation registry                         //
+    // --------------------------------------------------------------------- //
+
+    /// @notice Register the agreement implementation cloned for a given category.
+    /// @dev The implementation must be a RentalAgreement (or subclass) whose
+    ///      constructor locks itself via `_disableInitializers()`.
+    function setImplementation(string calldata category, address implementation) external onlyOwner {
+        require(implementation != address(0), "zero impl");
+        implementationOf[category] = implementation;
+        emit ImplementationSet(category, implementation);
+    }
+
+    /// @notice Update the fallback implementation used for unregistered categories.
+    function setDefaultImplementation(address implementation) external onlyOwner {
+        require(implementation != address(0), "zero impl");
+        defaultImplementation = implementation;
+        emit DefaultImplementationSet(implementation);
+    }
+
+    /// @notice Resolve the implementation that would be cloned for a category.
+    function implementationForCategory(string memory category) public view returns (address) {
+        address impl = implementationOf[category];
+        return impl == address(0) ? defaultImplementation : impl;
     }
 
     // --------------------------------------------------------------------- //
@@ -199,7 +238,11 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
         uint256 required = totalRent + securityDeposit + platformFee;
         if (msg.value < required) revert InsufficientPayment(required, msg.value);
 
-        RentalAgreement agreementContract = new RentalAgreement(
+        // Clone the category's implementation (EIP-1167 minimal proxy), then
+        // initialize + fund it in this same transaction so there is no window
+        // for anyone to initialize it first.
+        address agreementContract = Clones.clone(implementationForCategory(t.category));
+        RentalAgreement(agreementContract).initialize(
             RentalInit({
                 landlord: p.owner,
                 tenant: msg.sender,
@@ -219,10 +262,10 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
         );
 
         // Deliver exactly the escrow amount with a full gas budget.
-        agreementContract.fundInitial{value: required}();
+        RentalAgreement(payable(agreementContract)).fundInitial{value: required}();
 
-        userAgreements[msg.sender].push(address(agreementContract));
-        userAgreements[p.owner].push(address(agreementContract));
+        userAgreements[msg.sender].push(agreementContract);
+        userAgreements[p.owner].push(agreementContract);
 
         // Refund any overpayment to the tenant (pull would be safer, but the
         // tenant is an EOA here and this keeps the UX simple).

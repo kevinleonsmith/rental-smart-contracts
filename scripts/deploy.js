@@ -45,6 +45,24 @@ async function main() {
   const factoryAddr = await factory.getAddress();
   console.log("RentalAgreementFactory:", factoryAddr);
 
+  // Deploy one agreement implementation per category and register it so the
+  // factory clones the right subclass (EIP-1167) for each rental.
+  const implementations = {};
+  for (const [contractName, category] of [
+    ["PropertyRentalAgreement", "property"],
+    ["VehicleRentalAgreement", "vehicle"],
+    ["YachtRentalAgreement", "yacht"],
+  ]) {
+    const Impl = await ethers.getContractFactory(contractName);
+    const impl = await Impl.deploy();
+    await impl.waitForDeployment();
+    const addr = await impl.getAddress();
+    const tx = await factory.setImplementation(category, addr);
+    await tx.wait();
+    implementations[category] = addr;
+    console.log(`  ${category.padEnd(8)} -> ${contractName} @ ${addr}`);
+  }
+
   const Insurance = await ethers.getContractFactory("RentalInsuranceManager");
   const insurance = await Insurance.deploy();
   await insurance.waitForDeployment();
@@ -75,6 +93,7 @@ async function main() {
       RentalAgreementFactory: { address: factoryAddr, args: [feedAddress, treasury] },
       RentalInsuranceManager: { address: insuranceAddr, args: [] },
     },
+    implementations,
     priceFeed: feedAddress,
     timestamp: new Date().toISOString(),
   };

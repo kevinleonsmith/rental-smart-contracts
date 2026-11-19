@@ -37,13 +37,16 @@ contract VehicleRentalAgreement is RentalAgreement {
     }
 
     VehicleSpec public vehicle;
+    bool private _vehicleSet;
     UsageTracking public usage;
     TrafficViolation[] public trafficViolations;
 
     mapping(string => bool) public authorizedDrivers; // license number => authorized
 
-    uint256 public mileageExcessFeeWei = 0.00025 ether; // per excess mile
-    uint256 public refuelingFeeWei = 0.02 ether;
+    // Set in initialize(), not inline: inline field initializers run in the
+    // constructor, which EIP-1167 clones skip — so a clone would otherwise read 0.
+    uint256 public mileageExcessFeeWei; // per excess mile
+    uint256 public refuelingFeeWei;
 
     event DriverAuthorized(string licenseNumber, bool authorized);
     event InspectionRecorded(bool isPre, uint256 mileage, uint256 fuelLevel);
@@ -51,7 +54,18 @@ contract VehicleRentalAgreement is RentalAgreement {
     event RefuelingFeeApplied(uint256 fee);
     event TrafficViolationReported(uint256 indexed violationId, string violationType, uint256 fine);
 
-    constructor(RentalInit memory init, VehicleSpec memory _vehicle) RentalAgreement(init) {
+    /// @notice Clone initializer (replaces the constructor). Called once by the
+    ///         factory right after cloning this implementation.
+    function initialize(RentalInit memory init) public override initializer {
+        __RentalAgreement_init(init);
+        mileageExcessFeeWei = 0.00025 ether; // per excess mile
+        refuelingFeeWei = 0.02 ether;
+    }
+
+    /// @notice Landlord sets the vehicle specification once, after creation.
+    function configureVehicle(VehicleSpec calldata _vehicle) external onlyLandlord {
+        require(!_vehicleSet, "already configured");
+        _vehicleSet = true;
         vehicle = _vehicle;
     }
 
