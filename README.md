@@ -24,8 +24,10 @@ Deployed and running on the Ethereum **Sepolia** testnet:
 | `RentalAgreementFactory` | [`0x3447f2272168bcaB7CDF1BA485A48202c4B9b2b5`](https://sepolia.etherscan.io/address/0x3447f2272168bcaB7CDF1BA485A48202c4B9b2b5) |
 | `RentalInsuranceManager` | [`0x9035569aE40B1F74BFfC00C4c43435Fc380A4616`](https://sepolia.etherscan.io/address/0x9035569aE40B1F74BFfC00C4c43435Fc380A4616) |
 
-The factory is seeded with one template ("Standard Property Lease"). Uses the
-Chainlink ETH/USD feed at `0x694AA1769357215DE4FAC081bf1f309aDC325306`.
+Both contracts are **source-verified** on Etherscan — click an address and open the
+**Contract** tab to read the actual Solidity, not bytecode. The factory is seeded with
+one template ("Standard Property Lease") and uses the Chainlink ETH/USD feed at
+`0x694AA1769357215DE4FAC081bf1f309aDC325306`.
 
 ---
 
