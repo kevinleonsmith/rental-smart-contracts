@@ -1,0 +1,71 @@
+specVersion: 1.0.0
+description: Indexes the rental-escrow factory and every agreement clone it deploys.
+repository: https://github.com/kevinleonsmith/rental-smart-contracts
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum/contract
+    name: RentalAgreementFactory
+    network: sepolia
+    source:
+      address: "0x1940729Ab1351EbEDDf4c427d78e72fdebaF9D90"
+      abi: RentalAgreementFactory
+      startBlock: 12168067
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/factory.ts
+      entities:
+        - Agreement
+        - Template
+        - Property
+        - Platform
+      abis:
+        - name: RentalAgreementFactory
+          file: ./abis/RentalAgreementFactory.json
+      eventHandlers:
+        - event: TemplateCreated(indexed uint256,string,string)
+          handler: handleTemplateCreated
+        - event: PropertyRegistered(indexed uint256,indexed address,string)
+          handler: handlePropertyRegistered
+        - event: AgreementCreated(indexed address,indexed address,indexed address,uint256)
+          handler: handleAgreementCreated
+        - event: InsuranceAttached(indexed address,indexed uint256,uint256)
+          handler: handleInsuranceAttached
+templates:
+  - kind: ethereum/contract
+    name: RentalAgreement
+    network: sepolia
+    source:
+      abi: RentalAgreement
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/agreement.ts
+      entities:
+        - Agreement
+        - Deduction
+        - Dispute
+        - Platform
+      abis:
+        - name: RentalAgreement
+          file: ./abis/RentalAgreement.json
+      eventHandlers:
+        - event: AgreementFunded(uint256,uint256,uint256)
+          handler: handleAgreementFunded
+        - event: DeductionRequested(indexed uint256,string,uint256)
+          handler: handleDeductionRequested
+        - event: DeductionApproved(indexed uint256,uint256)
+          handler: handleDeductionApproved
+        - event: DeductionDisputed(indexed uint256,indexed address,string)
+          handler: handleDeductionDisputed
+        - event: DeductionResolved(indexed uint256,uint256,uint256)
+          handler: handleDeductionResolved
+        - event: SecurityDepositReleased(indexed address,uint256)
+          handler: handleSecurityDepositReleased
+        - event: AgreementStatusChanged(uint8,uint256)
+          handler: handleAgreementStatusChanged
+        - event: DisputeRaised(indexed address,string)
+          handler: handleDisputeRaised

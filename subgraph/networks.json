@@ -1,0 +1,8 @@
+{
+  "sepolia": {
+    "RentalAgreementFactory": {
+      "address": "0x1940729Ab1351EbEDDf4c427d78e72fdebaF9D90",
+      "startBlock": 12168067
+    }
+  }
+}

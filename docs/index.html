@@ -119,6 +119,21 @@
   .tx{word-break:break-all; font-size:12.5px}
   .err{color:var(--warn); font-size:13px}
 
+  .pill.warn{color:var(--warn); border-color:color-mix(in srgb,var(--warn) 35%,var(--line))}
+  .pill.done{color:var(--muted)}
+  .agr{border:1px solid var(--line); border-radius:12px; padding:14px; background:var(--panel-2); margin-bottom:12px}
+  .agr:last-child{margin-bottom:0}
+  .agr .ar{display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+  .agr .ar .id{font-weight:700; letter-spacing:-.01em}
+  .tagyou{font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:var(--brand); border:1px solid color-mix(in srgb,var(--brand) 40%,var(--line)); border-radius:999px; padding:1px 7px}
+  .agr .meta{display:flex; flex-wrap:wrap; gap:6px 18px; margin-top:9px; font-size:12.5px; color:var(--muted)}
+  .agr .meta b{color:var(--ink); font-weight:600}
+  .agr .deds{margin-top:10px; border-top:1px dashed var(--line); padding-top:9px}
+  .agr .ded{display:flex; justify-content:space-between; gap:10px; font-size:12.5px; padding:3px 0}
+  .agr .ded .st2{font-weight:700; font-size:11px}
+  .st2.ok{color:var(--ok)} .st2.warn{color:var(--warn)} .st2.mute{color:var(--muted)}
+  .agrSum{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px}
+
   footer{margin-top:40px; padding-top:20px; border-top:1px solid var(--line); color:var(--muted); font-size:13px}
   footer a{font-weight:600}
   .disc{font-size:12px; margin-top:8px}
@@ -204,10 +219,10 @@
     </div>
   </section>
 
-  <!-- YOUR AGREEMENTS -->
-  <section class="card" id="mineCard" style="display:none">
-    <div class="hd"><h2>Your agreements</h2><span class="spacer"></span><span class="sub" id="mineAddr"></span></div>
-    <div class="bd" id="mineBody"><div class="skel">—</div></div>
+  <!-- AGREEMENTS ON-CHAIN -->
+  <section class="card" id="agrCard">
+    <div class="hd"><h2>Agreements on-chain</h2><span class="spacer"></span><span class="sub" id="agrSub">indexing events…</span></div>
+    <div class="bd" id="agrBody"><div class="skel">Scanning the factory's <code>AgreementCreated</code> events and reading each clone's live state…</div></div>
   </section>
 
   <footer>
@@ -224,6 +239,8 @@ const CFG = {
   factory:   "0x1940729Ab1351EbEDDf4c427d78e72fdebaF9D90",
   insurance: "0x21857F6365b701d3cFCd214921ea39c24236AE80",
   feed:      "0x694AA1769357215DE4FAC081bf1f309aDC325306",
+  deployBlock: 12168067,     // factory deployment — lower bound for the log scan
+  maxLookback: 9000,         // public RPCs prune state; keep log ranges within reach
   explorer:  "https://sepolia.etherscan.io",
   repo:      "https://github.com/kevinleonsmith/rental-smart-contracts",
   rpcs: [
@@ -244,12 +261,21 @@ const FACTORY_ABI = [
   "function properties(uint256) view returns (address owner, string name, string category, string location, uint256 dailyRate, uint256 templateId, bool isAvailable, string metadataURI)",
   "function quote(uint256 propertyId, uint256 startTime, uint256 endTime) view returns (uint256 totalRent, uint256 securityDeposit, uint256 platformFee, uint256 insurancePremium)",
   "function createRentalAgreement(uint256 propertyId, uint256 startTime, uint256 endTime, string tenantDetails) payable returns (address)",
-  "function getUserAgreements(address user) view returns (address[])"
+  "function getUserAgreements(address user) view returns (address[])",
+  "event AgreementCreated(address indexed agreement, address indexed tenant, address indexed landlord, uint256 propertyId)",
+  "event InsuranceAttached(address indexed agreement, uint256 indexed policyId, uint256 premium)"
 ];
 const FEED_ABI = [
   "function decimals() view returns (uint8)",
   "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)"
 ];
+// Read-only view of a single agreement clone, for the live lifecycle list.
+const AGREEMENT_ABI = [
+  "function agreement() view returns (address landlord, address tenant, uint256 propertyId, uint256 templateId, uint256 startTime, uint256 endTime, uint256 totalRent, uint256 securityDeposit, uint256 platformFee, uint256 cancellationFeeBps, bool allowsEarlyTermination, string tenantDetails, uint8 status, uint256 createdAt)",
+  "function getDeductions() view returns (tuple(string reason, uint256 amount, string evidence, bool approved, bool disputed, bool resolved, uint256 createdAt)[])"
+];
+const STATUS = ["Active","Completed","Terminated","Disputed"];
+const STATUS_CLS = {Active:"ok",Completed:"done",Terminated:"warn",Disputed:"warn"};
 
 const $ = (id) => document.getElementById(id);
 const short = (a) => a.slice(0,6) + "…" + a.slice(-4);
@@ -467,7 +493,7 @@ async function connectWallet(){
     account = await signer.getAddress();
     $("connectBtn").textContent = short(account);
     updateRentBtn();
-    loadMine();
+    renderAgreements();   // re-tag any already-indexed agreements as "you"
   }catch(e){
     console.error(e);
     alert(e.shortMessage || e.message || "Wallet connection failed.");
@@ -489,7 +515,7 @@ async function rent(){
     st.innerHTML = `Submitted: <a class="tx" target="_blank" href="${CFG.explorer}/tx/${tx.hash}">${tx.hash}</a> — waiting…`;
     const rc = await tx.wait();
     st.innerHTML = `✅ Agreement created in block ${rc.blockNumber}. <a class="tx" target="_blank" href="${CFG.explorer}/tx/${tx.hash}">view tx</a>`;
-    loadMine();
+    scanAgreements();   // re-index so the new agreement shows up below
   }catch(e){
     st.innerHTML = `<span class="err">${esc(e.shortMessage || e.reason || e.message || "Transaction failed")}</span>`;
   }finally{
@@ -497,19 +523,124 @@ async function rent(){
   }
 }
 
-async function loadMine(){
-  if (!account) return;
-  $("mineCard").style.display = "";
-  $("mineAddr").textContent = short(account);
-  try{
-    const list = await factory.getUserAgreements(account);
-    if (!list.length){ $("mineBody").innerHTML = `<div class="skel">No agreements yet for this address. Rent the demo property above to create one.</div>`; return; }
-    $("mineBody").innerHTML = list.map((a,i)=>
-      `<div class="kv"><span class="k">Agreement #${i+1}</span><span class="v"><a class="addr" target="_blank" href="${exAddr(a)}">${short(a)}</a></span></div>`
-    ).join("");
-  }catch(e){
-    $("mineBody").innerHTML = `<div class="err">${esc(e.shortMessage||e.message||String(e))}</div>`;
+/* ---------- live agreement index (client-side "subgraph") ---------- */
+let agrState = { items: [], pruned: false };
+
+// Scan a factory event in block-range chunks, tolerating public RPCs that prune
+// old history (they reject ranges below their retained window).
+async function queryChunked(filter){
+  const latest = await provider.getBlockNumber();
+  let from = CFG.deployBlock;
+  const out = [];
+  let pruned = false;
+  while (from <= latest){
+    const to = Math.min(from + CFG.maxLookback - 1, latest);
+    try{
+      const logs = await factory.queryFilter(filter, from, to);
+      out.push(...logs);
+      from = to + 1;
+    }catch(e){
+      const floor = Math.max(CFG.deployBlock, latest - CFG.maxLookback);
+      if (from < floor){ from = floor; pruned = true; continue; }  // jump into the retained window
+      throw e;
+    }
   }
+  return { logs: out, pruned };
+}
+
+const propName = (id) => { const p = state.props.find(p => p.id === id); return p ? p.name : ("property #" + id); };
+
+async function scanAgreements(){
+  const sub = $("agrSub");
+  sub.textContent = "indexing events…";
+  try{
+    const [created, ins] = await Promise.all([
+      queryChunked(factory.filters.AgreementCreated()),
+      queryChunked(factory.filters.InsuranceAttached())
+    ]);
+    const insMap = {};
+    for (const l of ins.logs){ insMap[l.args.agreement.toLowerCase()] = { policyId:l.args.policyId, premium:l.args.premium }; }
+
+    const seen = new Set(); const metas = [];
+    for (const l of created.logs){
+      const key = l.args.agreement.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      metas.push({ addr:l.args.agreement, tenant:l.args.tenant, landlord:l.args.landlord,
+                   propertyId:Number(l.args.propertyId), block:l.blockNumber });
+    }
+    metas.sort((a,b) => b.block - a.block);  // newest first
+
+    const items = await Promise.all(metas.map(async m => {
+      try{
+        const c = new ethers.Contract(m.addr, AGREEMENT_ABI, provider);
+        const [d, deds] = await Promise.all([ c.agreement(), c.getDeductions() ]);
+        return { ...m, d, deds, ins: insMap[m.addr.toLowerCase()] || null, ok:true };
+      }catch(e){ return { ...m, ok:false }; }
+    }));
+    agrState = { items, pruned: created.pruned || ins.pruned };
+    renderAgreements();
+  }catch(e){
+    sub.textContent = "";
+    $("agrBody").innerHTML = `<div class="err">Couldn't scan agreements right now: ${esc(e.shortMessage||e.message||String(e))}</div>`;
+  }
+}
+
+function renderOne(i){
+  const mine = account && (i.tenant.toLowerCase()===account.toLowerCase() || i.landlord.toLowerCase()===account.toLowerCase());
+  const role = mine ? (i.tenant.toLowerCase()===account.toLowerCase() ? "tenant" : "landlord") : "";
+  if (!i.ok){
+    return `<div class="agr"><div class="ar"><a class="id addr" target="_blank" href="${exAddr(i.addr)}">${short(i.addr)}</a>${mine?`<span class="tagyou">you</span>`:``}<span class="pill warn">unreadable</span></div></div>`;
+  }
+  const d = i.d;
+  const st = STATUS[Number(d.status)] || "—";
+  const total = d.totalRent + d.securityDeposit + d.platformFee;
+  const deds = i.deds || [];
+  let dedHtml = "";
+  if (deds.length){
+    dedHtml = `<div class="deds">` + deds.map((x,idx)=>{
+      const s = x.resolved ? ["resolved by arbiter","mute"] : x.disputed ? ["disputed","warn"] : x.approved ? ["approved","ok"] : ["pending","mute"];
+      return `<div class="ded"><span>#${idx} ${esc(x.reason)} — <b>${fmtEth(x.amount)} ETH</b></span><span class="st2 ${s[1]}">${s[0]}</span></div>`;
+    }).join("") + `</div>`;
+  }
+  return `<div class="agr">
+    <div class="ar">
+      <a class="id addr" target="_blank" href="${exAddr(i.addr)}">${short(i.addr)}</a>
+      ${mine?`<span class="tagyou">you · ${role}</span>`:``}
+      <span class="pill ${STATUS_CLS[st]||"done"}">${st}</span>
+      ${i.ins?`<span class="pill ok">🛡 insured</span>`:``}
+      <span class="spacer"></span>
+      <span class="mute" style="font-size:12px">${esc(propName(Number(d.propertyId)))}</span>
+    </div>
+    <div class="meta">
+      <span>rent <b>${fmtEth(d.totalRent)}</b></span>
+      <span>deposit <b>${fmtEth(d.securityDeposit)}</b></span>
+      <span>fee <b>${fmtEth(d.platformFee)}</b></span>
+      ${i.ins?`<span>premium <b>${fmtEth(i.ins.premium)}</b></span>`:``}
+      <span>total <b>${fmtEth(total)} ETH</b></span>
+      <span>tenant <a class="addr" target="_blank" href="${exAddr(i.tenant)}">${short(i.tenant)}</a></span>
+      <span>landlord <a class="addr" target="_blank" href="${exAddr(i.landlord)}">${short(i.landlord)}</a></span>
+    </div>
+    ${dedHtml}
+  </div>`;
+}
+
+function renderAgreements(){
+  const { items, pruned } = agrState;
+  $("agrSub").textContent = items.length ? `${items.length} agreement${items.length>1?"s":""} indexed` : "none yet";
+  if (!items.length){
+    $("agrBody").innerHTML = `<div class="skel">No agreements created yet. Connect a wallet above and rent a property — the agreement will appear here with its live status, pulled straight from the chain.</div>`;
+    return;
+  }
+  const disputed = items.filter(i=>i.ok && Number(i.d.status)===3).length;
+  const insured = items.filter(i=>i.ins).length;
+  let html = `<div class="agrSum">
+    <span class="badge"><b>${items.length}</b> total</span>
+    ${disputed?`<span class="badge">⚠ <b>${disputed}</b> disputed</span>`:``}
+    ${insured?`<span class="badge">🛡 <b>${insured}</b> insured</span>`:``}
+  </div>` + items.map(renderOne).join("");
+  if (pruned) html += `<div class="note">Some older agreements may sit beyond this public RPC's retained history — the <a href="${CFG.repo}/tree/main/subgraph" target="_blank">subgraph</a> in the repo indexes the full history.</div>`;
+  $("agrBody").innerHTML = html;
 }
 
 /* ---------- utils ---------- */
@@ -536,6 +667,7 @@ async function boot(){
   await loadPrice();
   const counts = await loadOverview();
   await loadTemplatesAndProps(counts);
+  scanAgreements();   // live-index agreements + their lifecycle (no wallet needed)
 
   // live block ticker
   setInterval(async ()=>{ try{ $("bBlock").textContent = (await provider.getBlockNumber()).toLocaleString(); }catch(e){} }, 15000);

@@ -1,0 +1,89 @@
+type Template @entity(immutable: false) {
+  "templateId"
+  id: ID!
+  name: String!
+  category: String!
+  createdAt: BigInt!
+  agreements: [Agreement!]! @derivedFrom(field: "template")
+}
+
+type Property @entity(immutable: false) {
+  "propertyId"
+  id: ID!
+  owner: Bytes!
+  name: String!
+  createdAt: BigInt!
+  agreements: [Agreement!]! @derivedFrom(field: "property")
+}
+
+enum AgreementStatus {
+  Active
+  Completed
+  Terminated
+  Disputed
+}
+
+type Agreement @entity(immutable: false) {
+  "the agreement (clone) contract address"
+  id: ID!
+  tenant: Bytes!
+  landlord: Bytes!
+  property: Property
+  propertyId: BigInt!
+  template: Template
+  status: AgreementStatus!
+
+  totalRent: BigInt!
+  securityDeposit: BigInt!
+  platformFee: BigInt!
+
+  "set when the template required insurance and a policy was minted"
+  insured: Boolean!
+  insurancePolicyId: BigInt
+  insurancePremium: BigInt
+
+  depositReleased: Boolean!
+  depositRefunded: BigInt
+
+  createdAt: BigInt!
+  createdTx: Bytes!
+  lastUpdated: BigInt!
+
+  deductions: [Deduction!]! @derivedFrom(field: "agreement")
+  disputes: [Dispute!]! @derivedFrom(field: "agreement")
+}
+
+type Deduction @entity(immutable: false) {
+  "agreementAddress-deductionId"
+  id: ID!
+  agreement: Agreement!
+  deductionId: BigInt!
+  reason: String!
+  amount: BigInt!
+  approved: Boolean!
+  disputed: Boolean!
+  resolved: Boolean!
+  awardedToLandlord: BigInt
+  refundedToTenant: BigInt
+  createdAt: BigInt!
+}
+
+type Dispute @entity(immutable: true) {
+  "agreementAddress-logIndex"
+  id: ID!
+  agreement: Agreement!
+  raiser: Bytes!
+  reason: String!
+  raisedAt: BigInt!
+  tx: Bytes!
+}
+
+type Platform @entity(immutable: false) {
+  "singleton: 'platform'"
+  id: ID!
+  agreementCount: BigInt!
+  templateCount: BigInt!
+  propertyCount: BigInt!
+  totalEscrowed: BigInt!
+  totalInsurancePremiums: BigInt!
+}

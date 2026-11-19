@@ -17,7 +17,7 @@ npx hardhat run scripts/deploy.js   # local deploy with a mock price feed
 
 ## Live demo
 
-**▶ [kevinleonsmith.github.io/rental-smart-contracts](https://kevinleonsmith.github.io/rental-smart-contracts)** — a browser dapp that reads these contracts **live** from Sepolia. It shows the on-chain template and listed property, prices a rental through the real `quote()` call (with a USD figure from the Chainlink ETH/USD feed), and — with a wallet on Sepolia — creates a funded escrow agreement end to end. No wallet needed to look around.
+**▶ [kevinleonsmith.github.io/rental-smart-contracts](https://kevinleonsmith.github.io/rental-smart-contracts)** — a browser dapp that reads these contracts **live** from Sepolia. It shows the on-chain templates and listed properties, prices a rental through the real `quote()` call (with a USD figure from the Chainlink ETH/USD feed, and an insurance premium line when the template requires cover), and — with a wallet on Sepolia — creates a funded escrow agreement end to end. It also **indexes every agreement the factory has ever created** — scanning `AgreementCreated` events and reading each clone's live state — and lists them with status, escrow amounts, insurance, and any deductions or disputes. No wallet needed to look around.
 
 ## Live on Sepolia
 
@@ -89,6 +89,13 @@ Deposit deductions used to be approvable by *anyone* once the 7-day window passe
 
 > The **live Sepolia** factory above has the insurance manager wired in: the vehicle and yacht demo templates are flagged `requiresInsurance`, so renting one mints a real policy on-chain and the quote shows the premium as a separate line.
 
+### Indexing: client-side today, a real subgraph for production
+A rental platform needs to *list* agreements and their lifecycle, not just create them one at a time. The contracts emit everything needed for that — `AgreementCreated` on the factory, plus `AgreementFunded`, `DeductionRequested/Approved/Disputed/Resolved`, `DisputeRaised`, `AgreementStatusChanged`, and `SecurityDepositReleased` on each agreement.
+
+The **live demo indexes those events client-side**: it scans `AgreementCreated` from the factory's deploy block (in block-range chunks, tolerating public RPCs that prune old history) and reads each clone's current state directly. That keeps the demo a single static page with no backend to host, authenticate, or keep paying for — it just works when you open it.
+
+The repo also ships a complete, **buildable [The Graph subgraph](./subgraph)** (`subgraph/`) — the production-grade version of the same indexing. One static data source for the factory plus a **template data source** instantiated per agreement clone, mapping the full event set into queryable `Agreement` / `Deduction` / `Dispute` entities. It compiles with `graph codegen && graph build`; deploy it to Graph Studio and a frontend can replace the client-side scan with a single GraphQL query. (A hosted public endpoint needs your own Studio account and query key, which is why the demo defaults to client-side indexing rather than depending on an endpoint that could lapse.)
+
 ---
 
 ## Architecture
@@ -130,12 +137,13 @@ RentalInsuranceManager ─ policies, claims, pool-funded pull settlement (factor
 
 ## Roadmap
 
-Honest view of what's done and what's next:
+Honest view of what's shipped and what's next. Items #1–#4 are built, tested, and live on Sepolia:
 
 - ✅ **Category-specific escrow at deploy time** *(done, live)*. The factory selects the agreement implementation by the template's `category` and deploys it as an EIP-1167 clone — see [Per-category agreements via minimal-proxy clones](#per-category-agreements-via-minimal-proxy-clones). Live on Sepolia with all three implementations registered and verified.
 - ✅ **Contested-claim arbitration** *(done, live)*. A neutral arbiter resolves disputed deductions, and the tenant can contest a claim within the window to block timeout-approval — see [Contested-claim arbitration](#contested-claim-arbitration). Live on the Sepolia factory above.
 - ✅ **Insurance wired into the rental flow** *(done, live)*. A template flagged `requiresInsurance` mints a policy as part of `createRentalAgreement`, and `quote()` surfaces the premium — see [Insurance wired into the rental flow](#insurance-wired-into-the-rental-flow). Live on the Sepolia factory above; the vehicle and yacht demos mint a real policy on each rental.
-- **Subgraph + richer frontend.** Index `AgreementCreated` events so the demo lists real agreements and their lifecycle, rather than reading one address at a time.
+- ✅ **Subgraph + richer frontend** *(done, live)*. The demo indexes `AgreementCreated` and the per-agreement lifecycle events and lists every agreement with its live status, escrow, insurance, and deductions/disputes — see [Indexing](#indexing-client-side-today-a-real-subgraph-for-production). Client-side on the live page; a complete, buildable The Graph subgraph for production ships in [`subgraph/`](./subgraph).
+- **Next: decentralised arbitration.** Replace the single configurable arbiter with a bonded panel or a Kleros-style court, so contested deductions don't rest on one trusted address — see the note under [Security](#security-notes--scope).
 
 ## Security notes & scope
 
