@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rental Smart Contracts — Live Demo</title>
+<meta name="description" content="A live dapp reading on-chain rental escrow contracts deployed and source-verified on Ethereum Sepolia." />
+<style>
+  :root{
+    --bg:#f6f7fb; --panel:#ffffff; --panel-2:#fbfcfe; --ink:#1a1d29; --muted:#5b6172;
+    --line:#e6e8f0; --brand:#4f46e5; --brand-ink:#ffffff; --accent:#0ea5a4;
+    --ok:#15803d; --warn:#b45309; --chip:#eef0f8; --shadow:0 1px 2px rgba(20,24,48,.06),0 8px 24px rgba(20,24,48,.06);
+    --radius:14px;
+  }
+  :root:not([data-theme="light"]){
+    @media (prefers-color-scheme: dark){
+      --bg:#0d1017; --panel:#151926; --panel-2:#111522; --ink:#e9ecf5; --muted:#9aa2b8;
+      --line:#242a3b; --brand:#7c73ff; --brand-ink:#0d1017; --accent:#2dd4bf;
+      --ok:#4ade80; --warn:#fbbf24; --chip:#1b2030; --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0d1017; --panel:#151926; --panel-2:#111522; --ink:#e9ecf5; --muted:#9aa2b8;
+    --line:#242a3b; --brand:#7c73ff; --brand-ink:#0d1017; --accent:#2dd4bf;
+    --ok:#4ade80; --warn:#fbbf24; --chip:#1b2030; --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--brand); text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:980px; margin:0 auto; padding:0 16px 64px}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.86em}
+
+  header.top{
+    position:sticky; top:0; z-index:5; backdrop-filter:saturate(1.2) blur(8px);
+    background:color-mix(in srgb,var(--bg) 82%, transparent);
+    border-bottom:1px solid var(--line);
+  }
+  .top .wrap{display:flex; align-items:center; gap:12px; padding:12px 16px}
+  .logo{font-weight:700; letter-spacing:-.02em; display:flex; align-items:center; gap:9px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
+  .spacer{flex:1}
+  .ghost{
+    border:1px solid var(--line); background:var(--panel); color:var(--ink);
+    padding:7px 12px; border-radius:10px; font-size:13px; cursor:pointer; font-weight:600;
+  }
+  .ghost:hover{border-color:var(--brand)}
+
+  .hero{padding:40px 0 10px}
+  .hero h1{font-size:clamp(26px,4.4vw,40px); line-height:1.08; letter-spacing:-.025em; margin:0 0 12px}
+  .hero p{color:var(--muted); font-size:clamp(15px,2.2vw,17px); max-width:62ch; margin:0}
+  .badges{display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 0}
+  .badge{display:inline-flex; align-items:center; gap:7px; background:var(--chip); border:1px solid var(--line);
+    padding:5px 11px; border-radius:999px; font-size:12.5px; font-weight:600; color:var(--muted)}
+  .badge b{color:var(--ink); font-weight:700}
+  .live{color:var(--ok)}
+
+  section{margin-top:26px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow)}
+  .card .hd{display:flex; align-items:center; gap:10px; padding:16px 18px; border-bottom:1px solid var(--line)}
+  .card .hd h2{font-size:15px; margin:0; letter-spacing:-.01em}
+  .card .hd .sub{color:var(--muted); font-size:12.5px; font-weight:500}
+  .card .bd{padding:18px}
+  h2 .tag{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--accent)}
+
+  .grid{display:grid; gap:14px}
+  @media(min-width:640px){ .grid.two{grid-template-columns:1fr 1fr} .grid.three{grid-template-columns:repeat(3,1fr)} }
+
+  .kv{display:flex; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px dashed var(--line)}
+  .kv:last-child{border-bottom:0}
+  .kv .k{color:var(--muted)}
+  .kv .v{font-weight:600; text-align:right}
+  .addr{font-family:ui-monospace,Menlo,monospace; font-size:12.5px}
+
+  .pill{display:inline-block; padding:2px 9px; border-radius:999px; font-size:11.5px; font-weight:700; background:var(--chip); color:var(--muted); border:1px solid var(--line)}
+  .pill.ok{color:var(--ok); border-color:color-mix(in srgb,var(--ok) 35%,var(--line))}
+
+  .prop{display:flex; flex-direction:column; gap:3px}
+  .prop .nm{font-weight:700; font-size:16px; letter-spacing:-.01em}
+  .prop .loc{color:var(--muted); font-size:13px}
+  .prop .rate{margin-top:6px; font-size:14px}
+  .prop .rate b{font-size:18px}
+
+  label.fld{display:block; font-size:12.5px; font-weight:600; color:var(--muted); margin:0 0 6px}
+  select,input[type="number"],input[type="text"]{
+    width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--line);
+    background:var(--panel-2); color:var(--ink); font:inherit;
+  }
+  input[type="range"]{width:100%}
+  .row{display:grid; gap:14px}
+  @media(min-width:560px){ .row.two{grid-template-columns:1fr 1fr} }
+
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    background:var(--brand); color:var(--brand-ink); border:0; cursor:pointer;
+    padding:11px 16px; border-radius:11px; font-weight:700; font-size:14px; width:100%;
+  }
+  .btn:disabled{opacity:.55; cursor:not-allowed}
+  .btn.sec{background:var(--panel); color:var(--ink); border:1px solid var(--line)}
+
+  .quote-out{margin-top:16px; border:1px solid var(--line); border-radius:12px; overflow:hidden}
+  .quote-out .line{display:flex; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--line)}
+  .quote-out .line:last-child{border-bottom:0}
+  .quote-out .tot{background:var(--panel-2); font-weight:800}
+  .usd{color:var(--muted); font-weight:600; font-size:12.5px}
+
+  .note{font-size:12.5px; color:var(--muted); margin-top:10px}
+  .mute{color:var(--muted)}
+  .center{text-align:center}
+  .skel{color:var(--muted); font-size:13px}
+  .tx{word-break:break-all; font-size:12.5px}
+  .err{color:var(--warn); font-size:13px}
+
+  footer{margin-top:40px; padding-top:20px; border-top:1px solid var(--line); color:var(--muted); font-size:13px}
+  footer a{font-weight:600}
+  .disc{font-size:12px; margin-top:8px}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="logo"><span class="dot"></span> Rental Contracts</div>
+    <div class="spacer"></div>
+    <button class="ghost" id="themeBtn" title="Toggle theme">◐</button>
+    <button class="ghost" id="connectBtn">Connect Wallet</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="hero">
+    <h1>On-chain rental escrow, live on Ethereum</h1>
+    <p>A working demo of a factory-pattern rental platform: escrowed security deposits, automated
+    platform fees, and pull-payment settlement. Everything below is read <b>live</b> from
+    source-verified contracts on the Sepolia testnet — no wallet required to look around.</p>
+    <div class="badges">
+      <span class="badge"><span class="live">●</span> <b id="bNet">Sepolia</b></span>
+      <span class="badge">block <b id="bBlock">…</b></span>
+      <span class="badge">ETH/USD <b id="bPrice">…</b> <span class="mute">· Chainlink</span></span>
+      <span class="badge">fee <b id="bFee">…</b></span>
+    </div>
+  </div>
+
+  <!-- CONTRACTS -->
+  <section class="card">
+    <div class="hd"><h2>Deployed contracts <span class="tag">verified</span></h2>
+      <span class="spacer"></span><span class="sub">click to read the source on Etherscan</span></div>
+    <div class="bd grid two">
+      <div>
+        <div class="kv"><span class="k">RentalAgreementFactory</span><span class="v"><a id="lFactory" class="addr" target="_blank" rel="noopener">…</a></span></div>
+        <div class="kv"><span class="k">Templates registered</span><span class="v" id="vTemplates">…</span></div>
+        <div class="kv"><span class="k">Properties listed</span><span class="v" id="vProps">…</span></div>
+      </div>
+      <div>
+        <div class="kv"><span class="k">RentalInsuranceManager</span><span class="v"><a id="lInsurance" class="addr" target="_blank" rel="noopener">…</a></span></div>
+        <div class="kv"><span class="k">Price feed (ETH/USD)</span><span class="v"><a id="lFeed" class="addr" target="_blank" rel="noopener">…</a></span></div>
+        <div class="kv"><span class="k">Platform treasury</span><span class="v"><a id="lTreasury" class="addr" target="_blank" rel="noopener">…</a></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TEMPLATE -->
+  <section class="card">
+    <div class="hd"><h2>Rental template</h2><span class="spacer"></span><span class="sub">terms applied to every rental</span></div>
+    <div class="bd" id="tplBody"><div class="skel">Loading template…</div></div>
+  </section>
+
+  <!-- QUOTE + RENT -->
+  <section class="card">
+    <div class="hd"><h2>Price a rental</h2><span class="spacer"></span><span class="sub">calls <code>quote()</code> on-chain</span></div>
+    <div class="bd">
+      <div class="row two">
+        <div>
+          <label class="fld" for="propSel">Property</label>
+          <select id="propSel"><option>Loading…</option></select>
+        </div>
+        <div>
+          <label class="fld" for="daysIn">Length — <span id="daysLbl">7</span> days</label>
+          <input type="range" id="daysIn" min="3" max="30" value="7" />
+        </div>
+      </div>
+
+      <div class="quote-out" id="quoteOut" style="display:none">
+        <div class="line"><span>Rent</span><span><span id="qRent">—</span> ETH <span class="usd" id="qRentU"></span></span></div>
+        <div class="line"><span>Security deposit <span class="mute">(escrowed, refundable)</span></span><span><span id="qDep">—</span> ETH <span class="usd" id="qDepU"></span></span></div>
+        <div class="line"><span>Platform fee</span><span><span id="qFee">—</span> ETH <span class="usd" id="qFeeU"></span></span></div>
+        <div class="line tot"><span>Total to send</span><span><span id="qTot">—</span> ETH <span class="usd" id="qTotU"></span></span></div>
+      </div>
+      <div class="note" id="quoteNote"></div>
+
+      <div style="margin-top:16px">
+        <button class="btn" id="rentBtn" disabled>Connect a wallet to rent this</button>
+        <div class="note" id="rentStatus"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- YOUR AGREEMENTS -->
+  <section class="card" id="mineCard" style="display:none">
+    <div class="hd"><h2>Your agreements</h2><span class="spacer"></span><span class="sub" id="mineAddr"></span></div>
+    <div class="bd" id="mineBody"><div class="skel">—</div></div>
+  </section>
+
+  <footer>
+    <div>Source &amp; design write-up: <a id="lRepo" target="_blank" rel="noopener">github.com/kevinleonsmith/rental-smart-contracts</a></div>
+    <div class="disc">Sepolia <b>testnet</b> only — test ETH has no value. Not audited; reference/portfolio implementation. Need test ETH to try the rent flow? Use any public Sepolia faucet.</div>
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<script>
+const CFG = {
+  chainId: 11155111,
+  chainHex: "0xaa36a7",
+  factory:   "0x3447f2272168bcaB7CDF1BA485A48202c4B9b2b5",
+  insurance: "0x9035569aE40B1F74BFfC00C4c43435Fc380A4616",
+  feed:      "0x694AA1769357215DE4FAC081bf1f309aDC325306",
+  explorer:  "https://sepolia.etherscan.io",
+  repo:      "https://github.com/kevinleonsmith/rental-smart-contracts",
+  rpcs: [
+    "https://ethereum-sepolia-rpc.publicnode.com",
+    "https://sepolia.drpc.org",
+    "https://1rpc.io/sepolia",
+    "https://rpc.sepolia.org"
+  ]
+};
+
+const FACTORY_ABI = [
+  "function platformFeeBps() view returns (uint256)",
+  "function platformTreasury() view returns (address)",
+  "function priceFeed() view returns (address)",
+  "function templateCounter() view returns (uint256)",
+  "function propertyCounter() view returns (uint256)",
+  "function rentalTemplates(uint256) view returns (string name, string category, uint256 minDuration, uint256 maxDuration, uint256 securityDepositBps, uint256 lateFeeBps, uint256 cancellationFeeBps, bool requiresInsurance, bool allowsEarlyTermination, bool isActive, uint256 createdAt)",
+  "function properties(uint256) view returns (address owner, string name, string category, string location, uint256 dailyRate, uint256 templateId, bool isAvailable, string metadataURI)",
+  "function quote(uint256 propertyId, uint256 startTime, uint256 endTime) view returns (uint256 totalRent, uint256 securityDeposit, uint256 platformFee)",
+  "function createRentalAgreement(uint256 propertyId, uint256 startTime, uint256 endTime, string tenantDetails) payable returns (address)",
+  "function getUserAgreements(address user) view returns (address[])"
+];
+const FEED_ABI = [
+  "function decimals() view returns (uint8)",
+  "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)"
+];
+
+const $ = (id) => document.getElementById(id);
+const short = (a) => a.slice(0,6) + "…" + a.slice(-4);
+const exAddr = (a) => CFG.explorer + "/address/" + a;
+const fmtEth = (wei) => {
+  const s = ethers.formatEther(wei);
+  const n = Number(s);
+  if (n === 0) return "0";
+  if (n < 0.0001) return n.toExponential(2);
+  return n.toLocaleString(undefined,{maximumFractionDigits:6});
+};
+const bps = (v) => (Number(v)/100) + "%";
+
+let provider, factory, feed;
+let ethUsd = null;           // number, USD per ETH
+let state = { props:[], template:null };
+let signer = null, account = null;
+
+/* ---------- theme ---------- */
+(function(){
+  let t = null;
+  try { t = localStorage.getItem("theme"); } catch(e){}
+  if (t) document.documentElement.setAttribute("data-theme", t);
+  $("themeBtn").onclick = () => {
+    const cur = document.documentElement.getAttribute("data-theme");
+    const dark = cur ? cur === "dark"
+      : matchMedia("(prefers-color-scheme: dark)").matches;
+    const next = dark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("theme", next); } catch(e){}
+  };
+})();
+
+/* ---------- static links ---------- */
+function paintLinks(){
+  $("lFactory").textContent = short(CFG.factory); $("lFactory").href = exAddr(CFG.factory)+"#code";
+  $("lInsurance").textContent = short(CFG.insurance); $("lInsurance").href = exAddr(CFG.insurance)+"#code";
+  $("lFeed").textContent = short(CFG.feed); $("lFeed").href = exAddr(CFG.feed);
+  $("lRepo").href = CFG.repo;
+}
+
+/* ---------- provider ---------- */
+async function connectRpc(){
+  for (const url of CFG.rpcs){
+    try{
+      const p = new ethers.JsonRpcProvider(url, CFG.chainId, { staticNetwork: true });
+      const bn = await p.getBlockNumber();
+      $("bBlock").textContent = bn.toLocaleString();
+      return p;
+    }catch(e){ /* try next */ }
+  }
+  throw new Error("Could not reach any Sepolia RPC endpoint.");
+}
+
+async function loadPrice(){
+  try{
+    const dec = await feed.decimals();
+    const rd = await feed.latestRoundData();
+    ethUsd = Number(ethers.formatUnits(rd.answer, dec));
+    $("bPrice").textContent = "$" + ethUsd.toLocaleString(undefined,{maximumFractionDigits:0});
+  }catch(e){ $("bPrice").textContent = "—"; }
+}
+const usd = (wei) => ethUsd == null ? "" : "≈ $" + (Number(ethers.formatEther(wei))*ethUsd).toLocaleString(undefined,{maximumFractionDigits:2});
+
+/* ---------- load on-chain state ---------- */
+async function loadOverview(){
+  const [feeBps, treasury, tCount, pCount] = await Promise.all([
+    factory.platformFeeBps(), factory.platformTreasury(),
+    factory.templateCounter(), factory.propertyCounter()
+  ]);
+  $("bFee").textContent = bps(feeBps);
+  $("vTemplates").textContent = tCount.toString();
+  $("vProps").textContent = pCount.toString();
+  $("lTreasury").textContent = short(treasury); $("lTreasury").href = exAddr(treasury);
+  return { tCount:Number(tCount), pCount:Number(pCount) };
+}
+
+function paintTemplate(t){
+  state.template = t;
+  $("tplBody").innerHTML = `
+    <div class="prop" style="margin-bottom:14px">
+      <span class="nm">${esc(t.name)} <span class="pill">${esc(t.category)}</span></span>
+    </div>
+    <div class="grid three">
+      <div class="kv"><span class="k">Security deposit</span><span class="v">${bps(t.securityDepositBps)}</span></div>
+      <div class="kv"><span class="k">Late fee / day</span><span class="v">${bps(t.lateFeeBps)}</span></div>
+      <div class="kv"><span class="k">Cancellation fee</span><span class="v">${bps(t.cancellationFeeBps)}</span></div>
+      <div class="kv"><span class="k">Min length</span><span class="v">${Number(t.minDuration)/86400} days</span></div>
+      <div class="kv"><span class="k">Max length</span><span class="v">${Number(t.maxDuration)/86400} days</span></div>
+      <div class="kv"><span class="k">Early termination</span><span class="v">${t.allowsEarlyTermination?"allowed":"no"}</span></div>
+    </div>`;
+}
+
+async function loadTemplatesAndProps(counts){
+  if (counts.tCount >= 1){
+    const t = await factory.rentalTemplates(1);
+    paintTemplate(t);
+  } else {
+    $("tplBody").innerHTML = `<div class="skel">No templates registered yet.</div>`;
+  }
+
+  const sel = $("propSel");
+  if (counts.pCount < 1){
+    sel.innerHTML = `<option>No properties listed</option>`;
+    $("quoteNote").textContent = "No properties are registered on-chain yet.";
+    return;
+  }
+  const props = [];
+  for (let id=1; id<=counts.pCount; id++){
+    const p = await factory.properties(id);
+    props.push({ id, ...p });
+  }
+  state.props = props;
+  sel.innerHTML = props.map(p =>
+    `<option value="${p.id}">${esc(p.name)} — ${esc(p.location)} (${fmtEth(p.dailyRate)} ETH/day)</option>`
+  ).join("");
+  refreshQuote();
+}
+
+/* ---------- quote ---------- */
+let quoteTimer = null;
+function scheduleQuote(){ clearTimeout(quoteTimer); quoteTimer = setTimeout(refreshQuote, 250); }
+
+function currentProp(){
+  const id = Number($("propSel").value);
+  return state.props.find(p => p.id === id);
+}
+
+async function refreshQuote(){
+  const p = currentProp();
+  if (!p) return;
+  const days = Number($("daysIn").value);
+  const start = Math.floor(Date.now()/1000) + 3600;      // 1h in the future
+  const end = start + days*86400;
+  $("quoteNote").textContent = "Pricing on-chain…";
+  try{
+    const q = await factory.quote(p.id, start, end);
+    $("qRent").textContent = fmtEth(q.totalRent);  $("qRentU").textContent = usd(q.totalRent);
+    $("qDep").textContent  = fmtEth(q.securityDeposit); $("qDepU").textContent = usd(q.securityDeposit);
+    $("qFee").textContent  = fmtEth(q.platformFee); $("qFeeU").textContent = usd(q.platformFee);
+    const total = q.totalRent + q.securityDeposit + q.platformFee;
+    $("qTot").textContent  = fmtEth(total); $("qTotU").textContent = usd(total);
+    $("quoteOut").style.display = "";
+    $("quoteNote").innerHTML = `Live from <code>quote()</code> on the factory. The deposit is held in escrow and returned at settlement minus any approved deductions.`;
+    // stash for the rent tx
+    state.pending = { propertyId:p.id, start, end, value: total };
+    updateRentBtn();
+  }catch(e){
+    $("quoteNote").innerHTML = `<span class="err">Quote failed: ${esc(e.shortMessage||e.message||String(e))}</span>`;
+  }
+}
+
+/* ---------- wallet ---------- */
+function updateRentBtn(){
+  const btn = $("rentBtn");
+  if (!account){ btn.textContent = "Connect a wallet to rent this"; btn.disabled = true; return; }
+  const p = currentProp();
+  btn.disabled = false;
+  btn.textContent = p ? `Rent “${p.name}” — pay ${fmtEth(state.pending.value)} ETH` : "Select a property";
+}
+
+async function connectWallet(){
+  if (!window.ethereum){ alert("No Ethereum wallet found. Install MetaMask to try the rent flow."); return; }
+  try{
+    const bp = new ethers.BrowserProvider(window.ethereum);
+    await bp.send("eth_requestAccounts", []);
+    // ensure Sepolia
+    const net = await bp.getNetwork();
+    if (Number(net.chainId) !== CFG.chainId){
+      try{
+        await window.ethereum.request({ method:"wallet_switchEthereumChain", params:[{ chainId: CFG.chainHex }] });
+      }catch(sw){
+        if (sw.code === 4902){
+          await window.ethereum.request({ method:"wallet_addEthereumChain", params:[{
+            chainId: CFG.chainHex, chainName:"Sepolia",
+            nativeCurrency:{name:"Sepolia ETH",symbol:"ETH",decimals:18},
+            rpcUrls:[CFG.rpcs[0]], blockExplorerUrls:[CFG.explorer]
+          }]});
+        } else { throw sw; }
+      }
+    }
+    signer = await bp.getSigner();
+    account = await signer.getAddress();
+    $("connectBtn").textContent = short(account);
+    updateRentBtn();
+    loadMine();
+  }catch(e){
+    console.error(e);
+    alert(e.shortMessage || e.message || "Wallet connection failed.");
+  }
+}
+
+async function rent(){
+  if (!signer || !state.pending){ return; }
+  const btn = $("rentBtn"); const st = $("rentStatus");
+  btn.disabled = true; const old = btn.textContent; btn.textContent = "Confirm in your wallet…";
+  st.textContent = "";
+  try{
+    const fw = new ethers.Contract(CFG.factory, FACTORY_ABI, signer);
+    const { propertyId, start, end, value } = state.pending;
+    // refresh start so it is still in the future at mining time
+    const start2 = Math.floor(Date.now()/1000) + 1800;
+    const end2 = start2 + (end - start);
+    const tx = await fw.createRentalAgreement(propertyId, start2, end2, "web demo", { value });
+    st.innerHTML = `Submitted: <a class="tx" target="_blank" href="${CFG.explorer}/tx/${tx.hash}">${tx.hash}</a> — waiting…`;
+    const rc = await tx.wait();
+    st.innerHTML = `✅ Agreement created in block ${rc.blockNumber}. <a class="tx" target="_blank" href="${CFG.explorer}/tx/${tx.hash}">view tx</a>`;
+    loadMine();
+  }catch(e){
+    st.innerHTML = `<span class="err">${esc(e.shortMessage || e.reason || e.message || "Transaction failed")}</span>`;
+  }finally{
+    btn.disabled = false; btn.textContent = old;
+  }
+}
+
+async function loadMine(){
+  if (!account) return;
+  $("mineCard").style.display = "";
+  $("mineAddr").textContent = short(account);
+  try{
+    const list = await factory.getUserAgreements(account);
+    if (!list.length){ $("mineBody").innerHTML = `<div class="skel">No agreements yet for this address. Rent the demo property above to create one.</div>`; return; }
+    $("mineBody").innerHTML = list.map((a,i)=>
+      `<div class="kv"><span class="k">Agreement #${i+1}</span><span class="v"><a class="addr" target="_blank" href="${exAddr(a)}">${short(a)}</a></span></div>`
+    ).join("");
+  }catch(e){
+    $("mineBody").innerHTML = `<div class="err">${esc(e.shortMessage||e.message||String(e))}</div>`;
+  }
+}
+
+/* ---------- utils ---------- */
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c])); }
+
+/* ---------- boot ---------- */
+async function boot(){
+  paintLinks();
+  $("connectBtn").onclick = connectWallet;
+  $("rentBtn").onclick = rent;
+  $("propSel").onchange = refreshQuote;
+  $("daysIn").oninput = () => { $("daysLbl").textContent = $("daysIn").value; scheduleQuote(); };
+
+  try{
+    provider = await connectRpc();
+  }catch(e){
+    document.querySelector(".hero p").innerHTML =
+      `<span class="err">Couldn't reach a Sepolia RPC right now — the public endpoints may be rate-limiting. Refresh in a moment, or open the contracts directly on <a href="${exAddr(CFG.factory)}#code" target="_blank">Etherscan</a>.</span>`;
+    return;
+  }
+  factory = new ethers.Contract(CFG.factory, FACTORY_ABI, provider);
+  feed = new ethers.Contract(CFG.feed, FEED_ABI, provider);
+
+  await loadPrice();
+  const counts = await loadOverview();
+  await loadTemplatesAndProps(counts);
+
+  // live block ticker
+  setInterval(async ()=>{ try{ $("bBlock").textContent = (await provider.getBlockNumber()).toLocaleString(); }catch(e){} }, 15000);
+}
+boot();
+</script>
+</body>
+</html>

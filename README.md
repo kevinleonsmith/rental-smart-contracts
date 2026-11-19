@@ -15,6 +15,10 @@ npx hardhat run scripts/deploy.js   # local deploy with a mock price feed
 
 ---
 
+## Live demo
+
+**▶ [kevinleonsmith.github.io/rental-smart-contracts](https://kevinleonsmith.github.io/rental-smart-contracts)** — a browser dapp that reads these contracts **live** from Sepolia. It shows the on-chain template and listed property, prices a rental through the real `quote()` call (with a USD figure from the Chainlink ETH/USD feed), and — with a wallet on Sepolia — creates a funded escrow agreement end to end. No wallet needed to look around.
+
 ## Live on Sepolia
 
 Deployed and running on the Ethereum **Sepolia** testnet:
