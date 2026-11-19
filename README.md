@@ -9,7 +9,7 @@ Written in Solidity `0.8.24`, tested with Hardhat, built on OpenZeppelin v5.
 ```bash
 npm install
 npx hardhat compile
-npx hardhat test          # 16 passing
+npx hardhat test          # 28 passing
 npx hardhat run scripts/deploy.js   # local deploy with a mock price feed
 ```
 
@@ -25,17 +25,19 @@ Deployed and running on the Ethereum **Sepolia** testnet:
 
 | Contract | Address |
 |---|---|
-| `RentalAgreementFactory` | [`0x78787a9A8Df0dE5e755D0834c79313607705A8FC`](https://sepolia.etherscan.io/address/0x78787a9A8Df0dE5e755D0834c79313607705A8FC) |
-| `RentalInsuranceManager` | [`0xc16A0EBE4b86BE2078bec1CB43AD2b5b842fCC5F`](https://sepolia.etherscan.io/address/0xc16A0EBE4b86BE2078bec1CB43AD2b5b842fCC5F) |
-| `PropertyRentalAgreement` (impl) | [`0xd4d31e9BCD3ED8Edd0f56Ac9277a2De35Bf013F2`](https://sepolia.etherscan.io/address/0xd4d31e9BCD3ED8Edd0f56Ac9277a2De35Bf013F2) |
-| `VehicleRentalAgreement` (impl) | [`0xCeA3Bce86e5D4bDE5d976Ae767cDf27a6abC3CFc`](https://sepolia.etherscan.io/address/0xCeA3Bce86e5D4bDE5d976Ae767cDf27a6abC3CFc) |
-| `YachtRentalAgreement` (impl) | [`0x2A5E12FC9A8B0aDb3aE460B2980eAe025a169162`](https://sepolia.etherscan.io/address/0x2A5E12FC9A8B0aDb3aE460B2980eAe025a169162) |
+| `RentalAgreementFactory` | [`0x1940729Ab1351EbEDDf4c427d78e72fdebaF9D90`](https://sepolia.etherscan.io/address/0x1940729Ab1351EbEDDf4c427d78e72fdebaF9D90) |
+| `RentalInsuranceManager` | [`0x21857F6365b701d3cFCd214921ea39c24236AE80`](https://sepolia.etherscan.io/address/0x21857F6365b701d3cFCd214921ea39c24236AE80) |
+| `PropertyRentalAgreement` (impl) | [`0xe76A25956C048815279293c138991e0fe88b7C00`](https://sepolia.etherscan.io/address/0xe76A25956C048815279293c138991e0fe88b7C00) |
+| `VehicleRentalAgreement` (impl) | [`0xcbEA05a90576FB14Dfb0D930f44A4d23f702575B`](https://sepolia.etherscan.io/address/0xcbEA05a90576FB14Dfb0D930f44A4d23f702575B) |
+| `YachtRentalAgreement` (impl) | [`0x1529be9bBDC92Bf9A594Bd9D537Ecd09E8679C8d`](https://sepolia.etherscan.io/address/0x1529be9bBDC92Bf9A594Bd9D537Ecd09E8679C8d) |
 
 All contracts are **source-verified** on Etherscan — click an address and open the
 **Contract** tab to read the actual Solidity, not bytecode. The factory clones the right
 per-category implementation (property / vehicle / yacht) for each rental, is seeded with
 three templates and three demo properties, and uses the Chainlink ETH/USD feed at
-`0x694AA1769357215DE4FAC081bf1f309aDC325306`.
+`0x694AA1769357215DE4FAC081bf1f309aDC325306`. The insurance manager is wired into the
+factory, so renting an insurance-required template (the vehicle and yacht demos) mints a
+real policy on-chain in the same transaction.
 
 ---
 
@@ -85,6 +87,8 @@ Deposit deductions used to be approvable by *anyone* once the 7-day window passe
 ### Insurance wired into the rental flow
 `RentalInsuranceManager` used to be a standalone contract. Now, when a template is flagged `requiresInsurance`, creating a rental **mints a policy in the same transaction**. The factory derives the terms from the rental economics (coverage = rent + deposit, 5% deductible, `"comprehensive"`), `quote()` surfaces the premium as a fourth amount so the tenant pays escrow **plus** premium in one call, and the factory forwards the premium to the shared claims pool via `createPolicy` and links the policy to the new agreement. If a template requires insurance but no manager is configured, creation reverts rather than silently skipping cover.
 
+> The **live Sepolia** factory above has the insurance manager wired in: the vehicle and yacht demo templates are flagged `requiresInsurance`, so renting one mints a real policy on-chain and the quote shows the premium as a separate line.
+
 ---
 
 ## Architecture
@@ -100,7 +104,7 @@ RentalAgreement ──────── per-rental escrow: rent payout, deposit
         ├── VehicleRentalAgreement   (mileage/fuel/violation charges from deposit)
         └── YachtRentalAgreement     (usage logs, safety checks, minor-damage auto-settle)
 
-RentalInsuranceManager ─ optional policies, claims, pool-funded pull settlement (standalone)
+RentalInsuranceManager ─ policies, claims, pool-funded pull settlement (factory mints a policy per insured rental)
 ```
 
 | Contract | Responsibility |
@@ -110,19 +114,19 @@ RentalInsuranceManager ─ optional policies, claims, pool-funded pull settlemen
 | `PropertyRentalAgreement` | Residential/commercial lease extension. |
 | `VehicleRentalAgreement` | Car rental; excess-mileage, refuelling and traffic-fine charges settled against the deposit. |
 | `YachtRentalAgreement` | Maritime rental; usage logging, safety compliance, damage reports. |
-| `RentalInsuranceManager` | Independent insurance: premium quoting, claim filing, operator approval, pool-funded pull settlement. |
+| `RentalInsuranceManager` | Insurance pool: premium quoting, policy minting (the factory mints one per insured rental), claim filing, operator approval, pool-funded pull settlement. |
 
 ## Rental lifecycle
 
 1. **Platform owner** creates a template (`createRentalTemplate`).
 2. **Landlord** registers a property against a template (`registerProperty`).
-3. **Tenant** calls `quote()`, then `createRentalAgreement{value: rent + deposit + fee}()`. The factory deploys and funds a dedicated `RentalAgreement`; rent → landlord, fee → treasury, deposit → escrow; overpayment is refunded.
+3. **Tenant** calls `quote()`, then `createRentalAgreement{value: rent + deposit + fee + insurancePremium}()`. The factory clones and funds a dedicated `RentalAgreement`; rent → landlord, fee → treasury, deposit → escrow; if the template requires insurance the premium is forwarded to the insurance pool and a policy is minted against the new agreement; overpayment is refunded.
 4. During/after the term: deductions (`requestDeduction` → tenant `approveDeduction`, or anyone after the 7-day window), early termination with a cancellation fee, or disputes.
 5. **Settlement**: after the grace period the remaining deposit is credited to the tenant; every party calls `withdraw()`.
 
 ## Tests
 
-`test/RentalAgreement.test.js` — 16 passing specs covering quoting math, the fund/refund flow, pull withdrawals, deposit release, tenant- and timeout-based deduction approval, early-termination fees, access control, the vehicle mileage charge, and an end-to-end insurance claim.
+`test/RentalAgreement.test.js` — 28 passing specs covering quoting math, the fund/refund flow, pull withdrawals, deposit release, tenant- and timeout-based deduction approval, contested-claim arbitration, early-termination fees, access control, the clone/implementation registry, the vehicle mileage charge via a factory clone, insurance minted inline with a rental, and an end-to-end insurance claim.
 
 ## Roadmap
 
@@ -130,7 +134,7 @@ Honest view of what's done and what's next:
 
 - ✅ **Category-specific escrow at deploy time** *(done, live)*. The factory selects the agreement implementation by the template's `category` and deploys it as an EIP-1167 clone — see [Per-category agreements via minimal-proxy clones](#per-category-agreements-via-minimal-proxy-clones). Live on Sepolia with all three implementations registered and verified.
 - ✅ **Contested-claim arbitration** *(done, live)*. A neutral arbiter resolves disputed deductions, and the tenant can contest a claim within the window to block timeout-approval — see [Contested-claim arbitration](#contested-claim-arbitration). Live on the Sepolia factory above.
-- ✅ **Insurance wired into the rental flow** *(done)*. A template flagged `requiresInsurance` mints a policy as part of `createRentalAgreement` — see [Insurance wired into the rental flow](#insurance-wired-into-the-rental-flow). In the codebase and tested; ships to the live factory on the next redeploy.
+- ✅ **Insurance wired into the rental flow** *(done, live)*. A template flagged `requiresInsurance` mints a policy as part of `createRentalAgreement`, and `quote()` surfaces the premium — see [Insurance wired into the rental flow](#insurance-wired-into-the-rental-flow). Live on the Sepolia factory above; the vehicle and yacht demos mint a real policy on each rental.
 - **Subgraph + richer frontend.** Index `AgreementCreated` events so the demo lists real agreements and their lifecycle, rather than reading one address at a time.
 
 ## Security notes & scope

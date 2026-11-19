@@ -192,6 +192,7 @@
         <div class="line"><span>Rent</span><span><span id="qRent">—</span> ETH <span class="usd" id="qRentU"></span></span></div>
         <div class="line"><span>Security deposit <span class="mute">(escrowed, refundable)</span></span><span><span id="qDep">—</span> ETH <span class="usd" id="qDepU"></span></span></div>
         <div class="line"><span>Platform fee</span><span><span id="qFee">—</span> ETH <span class="usd" id="qFeeU"></span></span></div>
+        <div class="line" id="qPremLine" style="display:none"><span>Insurance premium <span class="mute">(policy minted on-chain)</span></span><span><span id="qPrem">—</span> ETH <span class="usd" id="qPremU"></span></span></div>
         <div class="line tot"><span>Total to send</span><span><span id="qTot">—</span> ETH <span class="usd" id="qTotU"></span></span></div>
       </div>
       <div class="note" id="quoteNote"></div>
@@ -220,8 +221,8 @@
 const CFG = {
   chainId: 11155111,
   chainHex: "0xaa36a7",
-  factory:   "0x78787a9A8Df0dE5e755D0834c79313607705A8FC",
-  insurance: "0xc16A0EBE4b86BE2078bec1CB43AD2b5b842fCC5F",
+  factory:   "0x1940729Ab1351EbEDDf4c427d78e72fdebaF9D90",
+  insurance: "0x21857F6365b701d3cFCd214921ea39c24236AE80",
   feed:      "0x694AA1769357215DE4FAC081bf1f309aDC325306",
   explorer:  "https://sepolia.etherscan.io",
   repo:      "https://github.com/kevinleonsmith/rental-smart-contracts",
@@ -241,7 +242,7 @@ const FACTORY_ABI = [
   "function propertyCounter() view returns (uint256)",
   "function rentalTemplates(uint256) view returns (string name, string category, uint256 minDuration, uint256 maxDuration, uint256 securityDepositBps, uint256 lateFeeBps, uint256 cancellationFeeBps, bool requiresInsurance, bool allowsEarlyTermination, bool isActive, uint256 createdAt)",
   "function properties(uint256) view returns (address owner, string name, string category, string location, uint256 dailyRate, uint256 templateId, bool isAvailable, string metadataURI)",
-  "function quote(uint256 propertyId, uint256 startTime, uint256 endTime) view returns (uint256 totalRent, uint256 securityDeposit, uint256 platformFee)",
+  "function quote(uint256 propertyId, uint256 startTime, uint256 endTime) view returns (uint256 totalRent, uint256 securityDeposit, uint256 platformFee, uint256 insurancePremium)",
   "function createRentalAgreement(uint256 propertyId, uint256 startTime, uint256 endTime, string tenantDetails) payable returns (address)",
   "function getUserAgreements(address user) view returns (address[])"
 ];
@@ -411,10 +412,20 @@ async function refreshQuote(){
     $("qRent").textContent = fmtEth(q.totalRent);  $("qRentU").textContent = usd(q.totalRent);
     $("qDep").textContent  = fmtEth(q.securityDeposit); $("qDepU").textContent = usd(q.securityDeposit);
     $("qFee").textContent  = fmtEth(q.platformFee); $("qFeeU").textContent = usd(q.platformFee);
-    const total = q.totalRent + q.securityDeposit + q.platformFee;
+    const prem = q.insurancePremium ?? 0n;
+    if (prem > 0n){
+      $("qPrem").textContent = fmtEth(prem); $("qPremU").textContent = usd(prem);
+      $("qPremLine").style.display = "";
+    } else {
+      $("qPremLine").style.display = "none";
+    }
+    const total = q.totalRent + q.securityDeposit + q.platformFee + prem;
     $("qTot").textContent  = fmtEth(total); $("qTotU").textContent = usd(total);
     $("quoteOut").style.display = "";
-    $("quoteNote").innerHTML = `Live from <code>quote()</code> on the factory — priced on the <b>${esc(p.category)}</b> template. The deposit is held in escrow and returned at settlement minus any approved deductions.`;
+    const insNote = prem > 0n
+      ? ` This template <b>requires insurance</b>, so the premium is paid in the same transaction and a policy is minted on-chain against the new agreement.`
+      : ``;
+    $("quoteNote").innerHTML = `Live from <code>quote()</code> on the factory — priced on the <b>${esc(p.category)}</b> template. The deposit is held in escrow and returned at settlement minus any approved deductions.` + insNote;
     // stash for the rent tx
     state.pending = { propertyId:p.id, start, end, value: total };
     updateRentBtn();
