@@ -106,6 +106,15 @@ RentalInsuranceManager ─ optional policies, claims, pool-funded pull settlemen
 
 `test/RentalAgreement.test.js` — 16 passing specs covering quoting math, the fund/refund flow, pull withdrawals, deposit release, tenant- and timeout-based deduction approval, early-termination fees, access control, the vehicle mileage charge, and an end-to-end insurance claim.
 
+## Roadmap
+
+Honest view of what's done and what's next:
+
+- **Category-specific escrow at deploy time.** The live factory currently instantiates the base `RentalAgreement` for every category. The `Vehicle`/`Yacht`/`Property` subclasses (with their mileage/fuel, usage-log, and inspection logic) exist and are unit-tested, but aren't yet the contracts the factory deploys. Next step: have the factory select the right subclass by the template's `category` — likely via a registry of per-category implementation addresses plus minimal-proxy (EIP-1167) clones, to keep deploy gas flat as the contracts grow.
+- **Contested-claim arbitration.** Deposit deductions are trust-minimized today (tenant consent or a timeout). A production system would add a neutral arbiter or an escrow-oracle path for disputed claims.
+- **Insurance wired into the rental flow.** `RentalInsuranceManager` is standalone; a template that `requiresInsurance` could mint/attach a policy as part of `createRentalAgreement`.
+- **Subgraph + richer frontend.** Index `AgreementCreated` events so the demo lists real agreements and their lifecycle, rather than reading one address at a time.
+
 ## Security notes & scope
 
 - Pull payments, checks-effects-interactions, `ReentrancyGuard`, `Pausable`, custom errors, OpenZeppelin `Ownable` v5.
