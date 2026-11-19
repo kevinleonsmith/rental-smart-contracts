@@ -43,8 +43,8 @@ async function deployFactoryFixture() {
 async function createAgreement(factory, tenant, { durationDays = 3, overpay = 0n } = {}) {
   const start = (await time.latest()) + 100;
   const end = start + durationDays * DAY;
-  const [rent, deposit, fee] = await factory.quote(1, start, end);
-  const required = rent + deposit + fee;
+  const [rent, deposit, fee, premium] = await factory.quote(1, start, end);
+  const required = rent + deposit + fee + premium;
 
   const tx = await factory
     .connect(tenant)
@@ -363,7 +363,7 @@ describe("VehicleRentalAgreement — excess mileage (via factory clone)", () => 
     await factory.updatePlatformFee(0); // clean arithmetic
 
     // 40% deposit, 1–30 day window. duration 4 days -> rentalDays 5 -> rent 5 ETH, deposit 2 ETH.
-    await factory.createRentalTemplate("Car", "vehicle", 1 * DAY, 30 * DAY, 4000n, LATE_BPS, 0, true, true);
+    await factory.createRentalTemplate("Car", "vehicle", 1 * DAY, 30 * DAY, 4000n, LATE_BPS, 0, false, true);
     const dailyRate = ethers.parseEther("1");
     await factory
       .connect(landlord)
@@ -469,5 +469,90 @@ describe("RentalInsuranceManager", () => {
     const before = await ethers.provider.getBalance(tenant.address);
     await ins.connect(tenant).withdraw();
     expect(await ethers.provider.getBalance(tenant.address)).to.be.greaterThan(before);
+  });
+});
+
+describe("Insurance wired into the rental flow", () => {
+  async function deployWithInsurance(requiresInsurance = true) {
+    const [deployer, landlord, tenant, treasury] = await ethers.getSigners();
+    const Mock = await ethers.getContractFactory("MockV3Aggregator");
+    const feed = await Mock.deploy(8, 2000_00000000n);
+    const Factory = await ethers.getContractFactory("RentalAgreementFactory");
+    const factory = await Factory.deploy(await feed.getAddress(), treasury.address);
+    const Ins = await ethers.getContractFactory("RentalInsuranceManager");
+    const ins = await Ins.deploy();
+    await factory.setInsuranceManager(await ins.getAddress());
+
+    await factory.createRentalTemplate(
+      "Insured", "property", 3 * DAY, 365 * DAY, DEPOSIT_BPS, LATE_BPS, CANCEL_BPS, requiresInsurance, true
+    );
+    await factory
+      .connect(landlord)
+      .registerProperty("Insured Loft", "property", "NYC", ethers.parseEther("1"), 1, "ipfs://m");
+    return { factory, ins, deployer, landlord, tenant };
+  }
+
+  it("mints a policy and charges the premium when the template requires insurance", async () => {
+    const { factory, ins, tenant } = await deployWithInsurance(true);
+    const start = (await time.latest()) + 100;
+    const end = start + 5 * DAY;
+    const [rent, deposit, fee, premium] = await factory.quote(1, start, end);
+    expect(premium).to.be.greaterThan(0);
+
+    const required = rent + deposit + fee + premium;
+    const tx = await factory.connect(tenant).createRentalAgreement(1, start, end, "x", { value: required });
+    const receipt = await tx.wait();
+    const ev = receipt.logs
+      .map((l) => {
+        try {
+          return factory.interface.parseLog(l);
+        } catch {
+          return null;
+        }
+      })
+      .find((e) => e && e.name === "AgreementCreated");
+    const agreementAddr = ev.args.agreement;
+
+    // A policy exists for this agreement, and the pool holds the premium.
+    expect(await ins.policyCounter()).to.equal(1);
+    expect(await ins.agreementToPolicy(agreementAddr)).to.equal(1);
+    expect(await ins.claimsPool()).to.equal(premium);
+
+    // The escrow contract holds only rent+deposit+fee; the premium went to the pool.
+    expect(await ethers.provider.getBalance(agreementAddr)).to.equal(rent + deposit + fee);
+
+    const policy = await ins.policies(1);
+    expect(policy.agreementContract).to.equal(agreementAddr);
+    expect(policy.coverage).to.equal(rent + deposit);
+    expect(policy.active).to.equal(true);
+  });
+
+  it("reverts if a template requires insurance but no manager is configured", async () => {
+    const [deployer, landlord, tenant, treasury] = await ethers.getSigners();
+    const Mock = await ethers.getContractFactory("MockV3Aggregator");
+    const feed = await Mock.deploy(8, 2000_00000000n);
+    const Factory = await ethers.getContractFactory("RentalAgreementFactory");
+    const factory = await Factory.deploy(await feed.getAddress(), treasury.address);
+    await factory.createRentalTemplate(
+      "Insured", "property", 3 * DAY, 365 * DAY, DEPOSIT_BPS, LATE_BPS, CANCEL_BPS, true, true
+    );
+    await factory
+      .connect(landlord)
+      .registerProperty("Loft", "property", "NYC", ethers.parseEther("1"), 1, "ipfs://m");
+    const start = (await time.latest()) + 100;
+    const end = start + 5 * DAY;
+    await expect(
+      factory.connect(tenant).createRentalAgreement(1, start, end, "x", { value: ethers.parseEther("50") })
+    ).to.be.revertedWith("insurance not configured");
+  });
+
+  it("charges no premium when the template does not require insurance", async () => {
+    const { factory, ins, tenant } = await deployWithInsurance(false);
+    const start = (await time.latest()) + 100;
+    const end = start + 5 * DAY;
+    const [rent, deposit, fee, premium] = await factory.quote(1, start, end);
+    expect(premium).to.equal(0);
+    await factory.connect(tenant).createRentalAgreement(1, start, end, "x", { value: rent + deposit + fee });
+    expect(await ins.policyCounter()).to.equal(0);
   });
 });

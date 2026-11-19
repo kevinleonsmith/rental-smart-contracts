@@ -69,6 +69,11 @@ async function main() {
   const insuranceAddr = await insurance.getAddress();
   console.log("RentalInsuranceManager:", insuranceAddr);
 
+  // Wire the insurance manager so templates flagged `requiresInsurance` mint a
+  // policy as part of each rental.
+  await (await factory.setInsuranceManager(insuranceAddr)).wait();
+  console.log("  insurance manager wired into factory");
+
   // Seed one example template so the deployment is immediately usable.
   const tx = await factory.createRentalTemplate(
     "Standard Property Lease",

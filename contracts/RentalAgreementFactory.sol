@@ -6,6 +6,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {RentalAgreement, RentalInit} from "./RentalAgreement.sol";
+import {RentalInsuranceManager} from "./RentalInsuranceManager.sol";
 
 /// @title RentalAgreementFactory
 /// @notice Registry of rental templates + properties, and the deployer of
@@ -61,6 +62,11 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
     /// @notice Fallback implementation cloned when a category has none registered.
     address public defaultImplementation;
 
+    /// @notice Optional insurance manager. When set, a rental against a template
+    ///         flagged `requiresInsurance` mints a policy in the same transaction.
+    address public insuranceManager;
+    string internal constant INSURANCE_POLICY_TYPE = "comprehensive";
+
     event TemplateCreated(uint256 indexed templateId, string name, string category);
     event PropertyRegistered(uint256 indexed propertyId, address indexed owner, string name);
     event AgreementCreated(
@@ -74,6 +80,8 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
     event ImplementationSet(string category, address implementation);
     event DefaultImplementationSet(address implementation);
     event ArbiterUpdated(address arbiter);
+    event InsuranceManagerSet(address manager);
+    event InsuranceAttached(address indexed agreement, uint256 indexed policyId, uint256 premium);
 
     error InvalidTemplate();
     error InvalidProperty();
@@ -117,6 +125,30 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
         require(newArbiter != address(0), "zero arbiter");
         arbiter = newArbiter;
         emit ArbiterUpdated(newArbiter);
+    }
+
+    /// @notice Set the insurance manager used to mint policies for rentals whose
+    ///         template requires insurance.
+    function setInsuranceManager(address manager) external onlyOwner {
+        require(manager != address(0), "zero manager");
+        insuranceManager = manager;
+        emit InsuranceManagerSet(manager);
+    }
+
+    /// @dev Insurance terms derived from the rental economics: coverage is the
+    ///      value at risk (rent + deposit), with a 5% deductible.
+    function _insuranceTerms(
+        uint256 totalRent,
+        uint256 securityDeposit,
+        uint256 duration
+    ) internal view returns (uint256 premium, uint256 coverage, uint256 deductible) {
+        coverage = totalRent + securityDeposit;
+        deductible = coverage / 20; // 5%
+        premium = RentalInsuranceManager(insuranceManager).quotePremium(
+            INSURANCE_POLICY_TYPE,
+            coverage,
+            duration
+        );
     }
 
     /// @notice Resolve the implementation that would be cloned for a category.
@@ -217,7 +249,16 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
         uint256 propertyId,
         uint256 startTime,
         uint256 endTime
-    ) public view returns (uint256 totalRent, uint256 securityDeposit, uint256 platformFee) {
+    )
+        public
+        view
+        returns (
+            uint256 totalRent,
+            uint256 securityDeposit,
+            uint256 platformFee,
+            uint256 insurancePremium
+        )
+    {
         Property storage p = properties[propertyId];
         RentalTemplate storage t = rentalTemplates[p.templateId];
         uint256 duration = endTime - startTime;
@@ -225,6 +266,9 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
         totalRent = p.dailyRate * rentalDays;
         securityDeposit = (totalRent * t.securityDepositBps) / BPS;
         platformFee = (totalRent * platformFeeBps) / BPS;
+        if (t.requiresInsurance && insuranceManager != address(0)) {
+            (insurancePremium, , ) = _insuranceTerms(totalRent, securityDeposit, duration);
+        }
     }
 
     /// @notice Tenant creates and funds a rental agreement in one transaction.
@@ -244,12 +288,15 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
         uint256 duration = endTime - startTime;
         if (duration < t.minDuration || duration > t.maxDuration) revert DurationOutOfRange();
 
-        (uint256 totalRent, uint256 securityDeposit, uint256 platformFee) = quote(
-            propertyId,
-            startTime,
-            endTime
-        );
-        uint256 required = totalRent + securityDeposit + platformFee;
+        (
+            uint256 totalRent,
+            uint256 securityDeposit,
+            uint256 platformFee,
+            uint256 insurancePremium
+        ) = quote(propertyId, startTime, endTime);
+        if (t.requiresInsurance) require(insuranceManager != address(0), "insurance not configured");
+        uint256 escrow = totalRent + securityDeposit + platformFee;
+        uint256 required = escrow + insurancePremium;
         if (msg.value < required) revert InsufficientPayment(required, msg.value);
 
         // Clone the category's implementation (EIP-1167 minimal proxy), then
@@ -277,7 +324,25 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
         );
 
         // Deliver exactly the escrow amount with a full gas budget.
-        RentalAgreement(payable(agreementContract)).fundInitial{value: required}();
+        RentalAgreement(payable(agreementContract)).fundInitial{value: escrow}();
+
+        // Mint an insurance policy in the same transaction when the template
+        // requires it, forwarding the premium to the shared claims pool.
+        if (t.requiresInsurance) {
+            (uint256 prem, uint256 coverage, uint256 deductible) = _insuranceTerms(
+                totalRent,
+                securityDeposit,
+                endTime - startTime
+            );
+            uint256 policyId = RentalInsuranceManager(insuranceManager).createPolicy{value: prem}(
+                agreementContract,
+                INSURANCE_POLICY_TYPE,
+                coverage,
+                deductible,
+                duration
+            );
+            emit InsuranceAttached(agreementContract, policyId, prem);
+        }
 
         userAgreements[msg.sender].push(agreementContract);
         userAgreements[p.owner].push(agreementContract);

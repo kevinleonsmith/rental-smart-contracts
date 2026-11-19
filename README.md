@@ -82,6 +82,9 @@ Because clones run no constructor, the contracts were moved to an OpenZeppelin `
 ### Contested-claim arbitration
 Deposit deductions used to be approvable by *anyone* once the 7-day window passed — so a tenant who disagreed had no real recourse. Each agreement now carries a neutral **arbiter** (written in at creation; defaulted and owner-updatable on the factory). The tenant can `disputeDeduction()` within the window, which blocks the timeout auto-approval and routes the claim to the arbiter, who settles it with `resolveDeduction(id, awardToLandlord)` — the landlord receives the awarded portion and the remainder is refunded to the tenant. An unresolved dispute never locks funds: at the 30-day long-stop the contested amount releases to the tenant. Approval and resolution are both refused once the deposit has been released, closing a double-credit path.
 
+### Insurance wired into the rental flow
+`RentalInsuranceManager` used to be a standalone contract. Now, when a template is flagged `requiresInsurance`, creating a rental **mints a policy in the same transaction**. The factory derives the terms from the rental economics (coverage = rent + deposit, 5% deductible, `"comprehensive"`), `quote()` surfaces the premium as a fourth amount so the tenant pays escrow **plus** premium in one call, and the factory forwards the premium to the shared claims pool via `createPolicy` and links the policy to the new agreement. If a template requires insurance but no manager is configured, creation reverts rather than silently skipping cover.
+
 ---
 
 ## Architecture
@@ -127,7 +130,7 @@ Honest view of what's done and what's next:
 
 - ✅ **Category-specific escrow at deploy time** *(done, live)*. The factory selects the agreement implementation by the template's `category` and deploys it as an EIP-1167 clone — see [Per-category agreements via minimal-proxy clones](#per-category-agreements-via-minimal-proxy-clones). Live on Sepolia with all three implementations registered and verified.
 - ✅ **Contested-claim arbitration** *(done, live)*. A neutral arbiter resolves disputed deductions, and the tenant can contest a claim within the window to block timeout-approval — see [Contested-claim arbitration](#contested-claim-arbitration). Live on the Sepolia factory above.
-- **Insurance wired into the rental flow.** `RentalInsuranceManager` is standalone; a template that `requiresInsurance` could mint/attach a policy as part of `createRentalAgreement`.
+- ✅ **Insurance wired into the rental flow** *(done)*. A template flagged `requiresInsurance` mints a policy as part of `createRentalAgreement` — see [Insurance wired into the rental flow](#insurance-wired-into-the-rental-flow). In the codebase and tested; ships to the live factory on the next redeploy.
 - **Subgraph + richer frontend.** Index `AgreementCreated` events so the demo lists real agreements and their lifecycle, rather than reading one address at a time.
 
 ## Security notes & scope
