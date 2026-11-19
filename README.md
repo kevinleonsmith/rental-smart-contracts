@@ -25,12 +25,16 @@ Deployed and running on the Ethereum **Sepolia** testnet:
 
 | Contract | Address |
 |---|---|
-| `RentalAgreementFactory` | [`0x3447f2272168bcaB7CDF1BA485A48202c4B9b2b5`](https://sepolia.etherscan.io/address/0x3447f2272168bcaB7CDF1BA485A48202c4B9b2b5) |
-| `RentalInsuranceManager` | [`0x9035569aE40B1F74BFfC00C4c43435Fc380A4616`](https://sepolia.etherscan.io/address/0x9035569aE40B1F74BFfC00C4c43435Fc380A4616) |
+| `RentalAgreementFactory` | [`0x8dA519002B470af09A1eB60196c0BA9f2449BC37`](https://sepolia.etherscan.io/address/0x8dA519002B470af09A1eB60196c0BA9f2449BC37) |
+| `RentalInsuranceManager` | [`0xf46db6eBc189DAB16b867ED2D66Af8b5134db9dA`](https://sepolia.etherscan.io/address/0xf46db6eBc189DAB16b867ED2D66Af8b5134db9dA) |
+| `PropertyRentalAgreement` (impl) | [`0x74E178BA0d2BFe2C766a1334b85aA6afc9b02135`](https://sepolia.etherscan.io/address/0x74E178BA0d2BFe2C766a1334b85aA6afc9b02135) |
+| `VehicleRentalAgreement` (impl) | [`0x472CD46AB804F3AAac4050D9Bd384b3F64Cbd32e`](https://sepolia.etherscan.io/address/0x472CD46AB804F3AAac4050D9Bd384b3F64Cbd32e) |
+| `YachtRentalAgreement` (impl) | [`0x9e6B19D094EF43080c6B811221645DA780CAFC06`](https://sepolia.etherscan.io/address/0x9e6B19D094EF43080c6B811221645DA780CAFC06) |
 
-Both contracts are **source-verified** on Etherscan — click an address and open the
-**Contract** tab to read the actual Solidity, not bytecode. The factory is seeded with
-one template ("Standard Property Lease") and uses the Chainlink ETH/USD feed at
+All contracts are **source-verified** on Etherscan — click an address and open the
+**Contract** tab to read the actual Solidity, not bytecode. The factory clones the right
+per-category implementation (property / vehicle / yacht) for each rental, is seeded with
+three templates and three demo properties, and uses the Chainlink ETH/USD feed at
 `0x694AA1769357215DE4FAC081bf1f309aDC325306`.
 
 ---
@@ -73,7 +77,7 @@ The factory keeps a registry mapping each template `category` → an agreement *
 
 Because clones run no constructor, the contracts were moved to an OpenZeppelin `Initializable` `initialize()` pattern: immutables became storage set on init, inline field initializers (which run in the constructor) moved into `initialize()`, and each implementation locks itself with `_disableInitializers()` so only clones — never the implementation — can be initialized. Initialize + fund happen atomically inside the factory call, so there is no window to front-run initialization.
 
-> The **live Sepolia** deployment above still runs the earlier (pre-clone) factory; this clone architecture is in the codebase and covered by tests. Redeploying to put it on-chain is the next step, not a code change.
+> The **live Sepolia** factory above runs exactly this clone architecture: creating a vehicle or yacht rental deploys a minimal-proxy clone of the matching verified implementation.
 
 ---
 
@@ -118,7 +122,7 @@ RentalInsuranceManager ─ optional policies, claims, pool-funded pull settlemen
 
 Honest view of what's done and what's next:
 
-- ✅ **Category-specific escrow at deploy time** *(done)*. The factory selects the agreement implementation by the template's `category` and deploys it as an EIP-1167 clone — see [Per-category agreements via minimal-proxy clones](#per-category-agreements-via-minimal-proxy-clones). The one remaining piece is redeploying so the **live** factory runs it (the current Sepolia factory predates this).
+- ✅ **Category-specific escrow at deploy time** *(done, live)*. The factory selects the agreement implementation by the template's `category` and deploys it as an EIP-1167 clone — see [Per-category agreements via minimal-proxy clones](#per-category-agreements-via-minimal-proxy-clones). Live on Sepolia with all three implementations registered and verified.
 - **Contested-claim arbitration.** Deposit deductions are trust-minimized today (tenant consent or a timeout). A production system would add a neutral arbiter or an escrow-oracle path for disputed claims.
 - **Insurance wired into the rental flow.** `RentalInsuranceManager` is standalone; a template that `requiresInsurance` could mint/attach a policy as part of `createRentalAgreement`.
 - **Subgraph + richer frontend.** Index `AgreementCreated` events so the demo lists real agreements and their lifecycle, rather than reading one address at a time.
