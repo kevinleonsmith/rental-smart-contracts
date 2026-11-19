@@ -25,11 +25,11 @@ Deployed and running on the Ethereum **Sepolia** testnet:
 
 | Contract | Address |
 |---|---|
-| `RentalAgreementFactory` | [`0x8dA519002B470af09A1eB60196c0BA9f2449BC37`](https://sepolia.etherscan.io/address/0x8dA519002B470af09A1eB60196c0BA9f2449BC37) |
-| `RentalInsuranceManager` | [`0xf46db6eBc189DAB16b867ED2D66Af8b5134db9dA`](https://sepolia.etherscan.io/address/0xf46db6eBc189DAB16b867ED2D66Af8b5134db9dA) |
-| `PropertyRentalAgreement` (impl) | [`0x74E178BA0d2BFe2C766a1334b85aA6afc9b02135`](https://sepolia.etherscan.io/address/0x74E178BA0d2BFe2C766a1334b85aA6afc9b02135) |
-| `VehicleRentalAgreement` (impl) | [`0x472CD46AB804F3AAac4050D9Bd384b3F64Cbd32e`](https://sepolia.etherscan.io/address/0x472CD46AB804F3AAac4050D9Bd384b3F64Cbd32e) |
-| `YachtRentalAgreement` (impl) | [`0x9e6B19D094EF43080c6B811221645DA780CAFC06`](https://sepolia.etherscan.io/address/0x9e6B19D094EF43080c6B811221645DA780CAFC06) |
+| `RentalAgreementFactory` | [`0x78787a9A8Df0dE5e755D0834c79313607705A8FC`](https://sepolia.etherscan.io/address/0x78787a9A8Df0dE5e755D0834c79313607705A8FC) |
+| `RentalInsuranceManager` | [`0xc16A0EBE4b86BE2078bec1CB43AD2b5b842fCC5F`](https://sepolia.etherscan.io/address/0xc16A0EBE4b86BE2078bec1CB43AD2b5b842fCC5F) |
+| `PropertyRentalAgreement` (impl) | [`0xd4d31e9BCD3ED8Edd0f56Ac9277a2De35Bf013F2`](https://sepolia.etherscan.io/address/0xd4d31e9BCD3ED8Edd0f56Ac9277a2De35Bf013F2) |
+| `VehicleRentalAgreement` (impl) | [`0xCeA3Bce86e5D4bDE5d976Ae767cDf27a6abC3CFc`](https://sepolia.etherscan.io/address/0xCeA3Bce86e5D4bDE5d976Ae767cDf27a6abC3CFc) |
+| `YachtRentalAgreement` (impl) | [`0x2A5E12FC9A8B0aDb3aE460B2980eAe025a169162`](https://sepolia.etherscan.io/address/0x2A5E12FC9A8B0aDb3aE460B2980eAe025a169162) |
 
 All contracts are **source-verified** on Etherscan — click an address and open the
 **Contract** tab to read the actual Solidity, not bytecode. The factory clones the right
@@ -126,7 +126,7 @@ RentalInsuranceManager ─ optional policies, claims, pool-funded pull settlemen
 Honest view of what's done and what's next:
 
 - ✅ **Category-specific escrow at deploy time** *(done, live)*. The factory selects the agreement implementation by the template's `category` and deploys it as an EIP-1167 clone — see [Per-category agreements via minimal-proxy clones](#per-category-agreements-via-minimal-proxy-clones). Live on Sepolia with all three implementations registered and verified.
-- ✅ **Contested-claim arbitration** *(done)*. A neutral arbiter resolves disputed deductions, and the tenant can contest a claim within the window to block timeout-approval — see [Contested-claim arbitration](#contested-claim-arbitration). In the codebase and tested; ships to the live factory on the next redeploy.
+- ✅ **Contested-claim arbitration** *(done, live)*. A neutral arbiter resolves disputed deductions, and the tenant can contest a claim within the window to block timeout-approval — see [Contested-claim arbitration](#contested-claim-arbitration). Live on the Sepolia factory above.
 - **Insurance wired into the rental flow.** `RentalInsuranceManager` is standalone; a template that `requiresInsurance` could mint/attach a policy as part of `createRentalAgreement`.
 - **Subgraph + richer frontend.** Index `AgreementCreated` events so the demo lists real agreements and their lifecycle, rather than reading one address at a time.
 

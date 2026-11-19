@@ -4,22 +4,22 @@
   "treasury": "0x83CeED70942eBdD2c418B93a1B773b0c91Cc6F8C",
   "contracts": {
     "RentalAgreementFactory": {
-      "address": "0x8dA519002B470af09A1eB60196c0BA9f2449BC37",
+      "address": "0x78787a9A8Df0dE5e755D0834c79313607705A8FC",
       "args": [
         "0x694AA1769357215DE4FAC081bf1f309aDC325306",
         "0x83CeED70942eBdD2c418B93a1B773b0c91Cc6F8C"
       ]
     },
     "RentalInsuranceManager": {
-      "address": "0xf46db6eBc189DAB16b867ED2D66Af8b5134db9dA",
+      "address": "0xc16A0EBE4b86BE2078bec1CB43AD2b5b842fCC5F",
       "args": []
     }
   },
   "implementations": {
-    "property": "0x74E178BA0d2BFe2C766a1334b85aA6afc9b02135",
-    "vehicle": "0x472CD46AB804F3AAac4050D9Bd384b3F64Cbd32e",
-    "yacht": "0x9e6B19D094EF43080c6B811221645DA780CAFC06"
+    "property": "0xd4d31e9BCD3ED8Edd0f56Ac9277a2De35Bf013F2",
+    "vehicle": "0xCeA3Bce86e5D4bDE5d976Ae767cDf27a6abC3CFc",
+    "yacht": "0x2A5E12FC9A8B0aDb3aE460B2980eAe025a169162"
   },
   "priceFeed": "0x694AA1769357215DE4FAC081bf1f309aDC325306",
-  "timestamp": "2026-11-19T09:13:38.929Z"
+  "timestamp": "2026-11-19T09:46:24.898Z"
 }
