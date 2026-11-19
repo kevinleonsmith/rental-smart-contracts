@@ -281,6 +281,7 @@ const $ = (id) => document.getElementById(id);
 const short = (a) => a.slice(0,6) + "…" + a.slice(-4);
 const exAddr = (a) => CFG.explorer + "/address/" + a;
 const fmtEth = (wei) => {
+  if (wei == null) return "—";
   const s = ethers.formatEther(wei);
   const n = Number(s);
   if (n === 0) return "0";
@@ -319,10 +320,17 @@ function paintLinks(){
 }
 
 /* ---------- provider ---------- */
+// Build a provider with a per-request timeout so a slow/rate-limited public RPC
+// fails over instead of hanging a request forever.
+function makeProvider(url){
+  const req = new ethers.FetchRequest(url);
+  req.timeout = 12000;
+  return new ethers.JsonRpcProvider(req, CFG.chainId, { staticNetwork: true });
+}
 async function connectRpc(){
   for (const url of CFG.rpcs){
     try{
-      const p = new ethers.JsonRpcProvider(url, CFG.chainId, { staticNetwork: true });
+      const p = makeProvider(url);
       const bn = await p.getBlockNumber();
       $("bBlock").textContent = bn.toLocaleString();
       return p;
@@ -407,7 +415,8 @@ async function loadTemplatesAndProps(counts){
   const props = [];
   for (let id=1; id<=counts.pCount; id++){
     const p = await factory.properties(id);
-    props.push({ id, ...p });
+    // ethers v6 Result spreads only numeric keys, so convert to a named object.
+    props.push({ id, ...p.toObject() });
   }
   state.props = props;
   sel.innerHTML = props.map(p =>
@@ -528,15 +537,15 @@ let agrState = { items: [], pruned: false };
 
 // Scan a factory event in block-range chunks, tolerating public RPCs that prune
 // old history (they reject ranges below their retained window).
-async function queryChunked(filter){
-  const latest = await provider.getBlockNumber();
+async function queryChunked(fac, prov, filter){
+  const latest = await prov.getBlockNumber();
   let from = CFG.deployBlock;
   const out = [];
   let pruned = false;
   while (from <= latest){
     const to = Math.min(from + CFG.maxLookback - 1, latest);
     try{
-      const logs = await factory.queryFilter(filter, from, to);
+      const logs = await fac.queryFilter(filter, from, to);
       out.push(...logs);
       from = to + 1;
     }catch(e){
@@ -553,37 +562,45 @@ const propName = (id) => { const p = state.props.find(p => p.id === id); return 
 async function scanAgreements(){
   const sub = $("agrSub");
   sub.textContent = "indexing events…";
-  try{
-    const [created, ins] = await Promise.all([
-      queryChunked(factory.filters.AgreementCreated()),
-      queryChunked(factory.filters.InsuranceAttached())
-    ]);
-    const insMap = {};
-    for (const l of ins.logs){ insMap[l.args.agreement.toLowerCase()] = { policyId:l.args.policyId, premium:l.args.premium }; }
+  // Try the live provider first, then fresh timed providers, so a slow or
+  // rate-limited endpoint fails over instead of leaving the list spinning.
+  const provs = [provider, ...CFG.rpcs.map(makeProvider)];
+  let lastErr = null;
+  for (const prov of provs){
+    try{
+      const fac = new ethers.Contract(CFG.factory, FACTORY_ABI, prov);
+      const [created, ins] = await Promise.all([
+        queryChunked(fac, prov, fac.filters.AgreementCreated()),
+        queryChunked(fac, prov, fac.filters.InsuranceAttached())
+      ]);
+      const insMap = {};
+      for (const l of ins.logs){ insMap[l.args.agreement.toLowerCase()] = { policyId:l.args.policyId, premium:l.args.premium }; }
 
-    const seen = new Set(); const metas = [];
-    for (const l of created.logs){
-      const key = l.args.agreement.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      metas.push({ addr:l.args.agreement, tenant:l.args.tenant, landlord:l.args.landlord,
-                   propertyId:Number(l.args.propertyId), block:l.blockNumber });
-    }
-    metas.sort((a,b) => b.block - a.block);  // newest first
+      const seen = new Set(); const metas = [];
+      for (const l of created.logs){
+        const key = l.args.agreement.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        metas.push({ addr:l.args.agreement, tenant:l.args.tenant, landlord:l.args.landlord,
+                     propertyId:Number(l.args.propertyId), block:l.blockNumber });
+      }
+      metas.sort((a,b) => b.block - a.block);  // newest first
 
-    const items = await Promise.all(metas.map(async m => {
-      try{
-        const c = new ethers.Contract(m.addr, AGREEMENT_ABI, provider);
-        const [d, deds] = await Promise.all([ c.agreement(), c.getDeductions() ]);
-        return { ...m, d, deds, ins: insMap[m.addr.toLowerCase()] || null, ok:true };
-      }catch(e){ return { ...m, ok:false }; }
-    }));
-    agrState = { items, pruned: created.pruned || ins.pruned };
-    renderAgreements();
-  }catch(e){
-    sub.textContent = "";
-    $("agrBody").innerHTML = `<div class="err">Couldn't scan agreements right now: ${esc(e.shortMessage||e.message||String(e))}</div>`;
+      const items = await Promise.all(metas.map(async m => {
+        try{
+          const c = new ethers.Contract(m.addr, AGREEMENT_ABI, prov);
+          const [d, deds] = await Promise.all([ c.agreement(), c.getDeductions() ]);
+          return { ...m, d, deds, ins: insMap[m.addr.toLowerCase()] || null, ok:true };
+        }catch(e){ return { ...m, ok:false }; }
+      }));
+      agrState = { items, pruned: created.pruned || ins.pruned };
+      renderAgreements();
+      return;
+    }catch(e){ lastErr = e; /* fail over to the next RPC */ }
   }
+  sub.textContent = "";
+  $("agrBody").innerHTML = `<div class="err">Couldn't scan agreements right now (${esc((lastErr&&(lastErr.shortMessage||lastErr.message))||"RPC error")}). <a href="#" id="agrRetry">Retry</a></div>`;
+  const r = $("agrRetry"); if (r) r.onclick = (ev)=>{ ev.preventDefault(); scanAgreements(); };
 }
 
 function renderOne(i){
