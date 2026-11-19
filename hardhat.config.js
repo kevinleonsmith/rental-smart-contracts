@@ -1,4 +1,7 @@
 require("@nomicfoundation/hardhat-toolbox");
+require("dotenv").config();
+
+const { SEPOLIA_RPC_URL, PRIVATE_KEY, ETHERSCAN_API_KEY } = process.env;
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -11,10 +14,16 @@ module.exports = {
   },
   networks: {
     hardhat: {},
-    // Example testnet config — fill via environment variables before use.
-    // sepolia: {
-    //   url: process.env.SEPOLIA_RPC_URL || "",
-    //   accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
-    // },
+    sepolia: {
+      url: SEPOLIA_RPC_URL || "",
+      accounts: PRIVATE_KEY ? [PRIVATE_KEY] : [],
+    },
+  },
+  etherscan: {
+    // A single Etherscan v2 API key verifies across supported chains.
+    apiKey: ETHERSCAN_API_KEY || "",
+  },
+  sourcify: {
+    enabled: false,
   },
 };

@@ -1,0 +1,20 @@
+{
+  "network": "sepolia",
+  "deployer": "0x83CeED70942eBdD2c418B93a1B773b0c91Cc6F8C",
+  "treasury": "0x83CeED70942eBdD2c418B93a1B773b0c91Cc6F8C",
+  "contracts": {
+    "RentalAgreementFactory": {
+      "address": "0x3447f2272168bcaB7CDF1BA485A48202c4B9b2b5",
+      "args": [
+        "0x694AA1769357215DE4FAC081bf1f309aDC325306",
+        "0x83CeED70942eBdD2c418B93a1B773b0c91Cc6F8C"
+      ]
+    },
+    "RentalInsuranceManager": {
+      "address": "0x9035569aE40B1F74BFfC00C4c43435Fc380A4616",
+      "args": []
+    }
+  },
+  "priceFeed": "0x694AA1769357215DE4FAC081bf1f309aDC325306",
+  "timestamp": "2026-11-19T05:14:25.219Z"
+}

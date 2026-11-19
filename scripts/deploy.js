@@ -1,4 +1,6 @@
 const { ethers, network } = require("hardhat");
+const fs = require("fs");
+const path = require("path");
 
 // Chainlink ETH/USD feeds by network. Add more as needed.
 const ETH_USD_FEEDS = {
@@ -6,9 +8,22 @@ const ETH_USD_FEEDS = {
   mainnet: "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
 };
 
+const EXPLORERS = {
+  sepolia: "https://sepolia.etherscan.io/address/",
+  mainnet: "https://etherscan.io/address/",
+};
+
 async function main() {
   const [deployer] = await ethers.getSigners();
-  console.log("Deployer:", deployer.address, "on", network.name);
+  if (!deployer) {
+    throw new Error(
+      "No deployer account. Set PRIVATE_KEY (and SEPOLIA_RPC_URL) in .env before deploying to a live network."
+    );
+  }
+  const balance = await ethers.provider.getBalance(deployer.address);
+  console.log(`Network:  ${network.name}`);
+  console.log(`Deployer: ${deployer.address}`);
+  console.log(`Balance:  ${ethers.formatEther(balance)} ETH\n`);
 
   // On a local network, deploy a mock price feed; otherwise use the real one.
   let feedAddress = ETH_USD_FEEDS[network.name];
@@ -17,7 +32,9 @@ async function main() {
     const mock = await Mock.deploy(8, 2000_00000000n);
     await mock.waitForDeployment();
     feedAddress = await mock.getAddress();
-    console.log("Deployed MockV3Aggregator:", feedAddress);
+    console.log("MockV3Aggregator:      ", feedAddress);
+  } else {
+    console.log("ETH/USD price feed:    ", feedAddress, "(Chainlink)");
   }
 
   const treasury = process.env.PLATFORM_TREASURY || deployer.address;
@@ -25,12 +42,14 @@ async function main() {
   const Factory = await ethers.getContractFactory("RentalAgreementFactory");
   const factory = await Factory.deploy(feedAddress, treasury);
   await factory.waitForDeployment();
-  console.log("RentalAgreementFactory:", await factory.getAddress());
+  const factoryAddr = await factory.getAddress();
+  console.log("RentalAgreementFactory:", factoryAddr);
 
   const Insurance = await ethers.getContractFactory("RentalInsuranceManager");
   const insurance = await Insurance.deploy();
   await insurance.waitForDeployment();
-  console.log("RentalInsuranceManager:", await insurance.getAddress());
+  const insuranceAddr = await insurance.getAddress();
+  console.log("RentalInsuranceManager:", insuranceAddr);
 
   // Seed one example template so the deployment is immediately usable.
   const tx = await factory.createRentalTemplate(
@@ -45,7 +64,36 @@ async function main() {
     true
   );
   await tx.wait();
-  console.log("Seeded template #1");
+  console.log("\nSeeded template #1 (Standard Property Lease)");
+
+  // Persist addresses + constructor args for verification and the README.
+  const record = {
+    network: network.name,
+    deployer: deployer.address,
+    treasury,
+    contracts: {
+      RentalAgreementFactory: { address: factoryAddr, args: [feedAddress, treasury] },
+      RentalInsuranceManager: { address: insuranceAddr, args: [] },
+    },
+    priceFeed: feedAddress,
+    timestamp: new Date().toISOString(),
+  };
+  const dir = path.join(__dirname, "..", "deployments");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${network.name}.json`), JSON.stringify(record, null, 2));
+
+  const explorer = EXPLORERS[network.name];
+  if (explorer) {
+    console.log("\nExplorer links:");
+    console.log("  Factory:   " + explorer + factoryAddr);
+    console.log("  Insurance: " + explorer + insuranceAddr);
+    console.log("\nVerify with:");
+    console.log(
+      `  npx hardhat verify --network ${network.name} ${factoryAddr} ${feedAddress} ${treasury}`
+    );
+    console.log(`  npx hardhat verify --network ${network.name} ${insuranceAddr}`);
+  }
+  console.log(`\nSaved deployments/${network.name}.json`);
 }
 
 main().catch((e) => {
