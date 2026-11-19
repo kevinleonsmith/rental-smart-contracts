@@ -238,6 +238,81 @@ describe("RentalAgreement — pull payments & deposit", () => {
   });
 });
 
+describe("RentalAgreement — contested-claim arbitration", () => {
+  it("lets the tenant dispute a deduction and the arbiter split it", async () => {
+    const { factory, deployer, landlord, tenant } = await deployFactoryFixture();
+    const { agreement, end, deposit, rent } = await createAgreement(factory, tenant);
+    await time.increaseTo(end + 1);
+    await agreement.connect(landlord).completeAgreement();
+
+    const claim = ethers.parseEther("1");
+    await agreement.connect(landlord).requestDeduction("scratches", claim, "ipfs://e");
+    await agreement.connect(tenant).disputeDeduction(0, "overstated");
+
+    // Timeout auto-approval is now blocked, even after the window elapses.
+    await time.increase(7 * DAY + 1);
+    await expect(agreement.connect(landlord).approveDeduction(0)).to.be.revertedWith(
+      "disputed - arbiter must resolve"
+    );
+
+    // Arbiter (the factory deployer by default) awards half to the landlord.
+    const award = claim / 2n;
+    await expect(agreement.connect(deployer).resolveDeduction(0, award))
+      .to.emit(agreement, "DeductionResolved")
+      .withArgs(0, award, claim - award);
+
+    expect(await agreement.securityDepositDeducted()).to.equal(award);
+    expect(await agreement.pendingWithdrawals(landlord.address)).to.equal(rent + award);
+    // All claims settled -> remaining deposit refunded to the tenant.
+    expect(await agreement.securityDepositReleased()).to.equal(true);
+    expect(await agreement.pendingWithdrawals(tenant.address)).to.equal(deposit - award);
+  });
+
+  it("restricts who can dispute and who can resolve", async () => {
+    const { factory, landlord, tenant, other } = await deployFactoryFixture();
+    const { agreement, end } = await createAgreement(factory, tenant);
+    await time.increaseTo(end + 1);
+    await agreement.connect(landlord).completeAgreement();
+    await agreement.connect(landlord).requestDeduction("x", ethers.parseEther("0.2"), "");
+
+    await expect(
+      agreement.connect(other).disputeDeduction(0, "no")
+    ).to.be.revertedWithCustomError(agreement, "NotTenant");
+
+    await agreement.connect(tenant).disputeDeduction(0, "contest");
+
+    // The landlord is not the arbiter, so cannot resolve.
+    await expect(
+      agreement.connect(landlord).resolveDeduction(0, 0)
+    ).to.be.revertedWithCustomError(agreement, "NotArbiter");
+  });
+
+  it("blocks disputing once the window has closed", async () => {
+    const { factory, landlord, tenant } = await deployFactoryFixture();
+    const { agreement, end } = await createAgreement(factory, tenant);
+    await time.increaseTo(end + 1);
+    await agreement.connect(landlord).completeAgreement();
+    await agreement.connect(landlord).requestDeduction("x", ethers.parseEther("0.2"), "");
+
+    await time.increase(7 * DAY + 1);
+    await expect(agreement.connect(tenant).disputeDeduction(0, "late")).to.be.revertedWith(
+      "window closed"
+    );
+  });
+
+  it("writes the factory arbiter into new agreements and lets the owner change it", async () => {
+    const { factory, deployer, tenant, other } = await deployFactoryFixture();
+    const { agreement } = await createAgreement(factory, tenant);
+    expect(await agreement.arbiter()).to.equal(deployer.address);
+
+    await factory.setArbiter(other.address);
+    const { agreement: next } = await createAgreement(factory, tenant);
+    expect(await next.arbiter()).to.equal(other.address);
+    // The earlier agreement keeps its original arbiter.
+    expect(await agreement.arbiter()).to.equal(deployer.address);
+  });
+});
+
 describe("Factory clones & implementation registry", () => {
   it("deploys agreements as minimal-proxy clones of the default implementation", async () => {
     const { factory, tenant } = await deployFactoryFixture();
@@ -265,7 +340,8 @@ describe("Factory clones & implementation registry", () => {
       landlord: ethers.ZeroAddress, tenant: ethers.ZeroAddress, propertyId: 0, templateId: 0,
       startTime: 0, endTime: 1, totalRent: 0, securityDeposit: 0, platformFee: 0,
       cancellationFeeBps: 0, allowsEarlyTermination: false,
-      platformTreasury: ethers.ZeroAddress, priceFeed: ethers.ZeroAddress, tenantDetails: "",
+      platformTreasury: ethers.ZeroAddress, priceFeed: ethers.ZeroAddress,
+      arbiter: ethers.ZeroAddress, tenantDetails: "",
     };
     await expect(impl.initialize(init)).to.be.revertedWithCustomError(impl, "InvalidInitialization");
   });

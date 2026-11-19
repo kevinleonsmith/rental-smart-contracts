@@ -79,6 +79,9 @@ Because clones run no constructor, the contracts were moved to an OpenZeppelin `
 
 > The **live Sepolia** factory above runs exactly this clone architecture: creating a vehicle or yacht rental deploys a minimal-proxy clone of the matching verified implementation.
 
+### Contested-claim arbitration
+Deposit deductions used to be approvable by *anyone* once the 7-day window passed — so a tenant who disagreed had no real recourse. Each agreement now carries a neutral **arbiter** (written in at creation; defaulted and owner-updatable on the factory). The tenant can `disputeDeduction()` within the window, which blocks the timeout auto-approval and routes the claim to the arbiter, who settles it with `resolveDeduction(id, awardToLandlord)` — the landlord receives the awarded portion and the remainder is refunded to the tenant. An unresolved dispute never locks funds: at the 30-day long-stop the contested amount releases to the tenant. Approval and resolution are both refused once the deposit has been released, closing a double-credit path.
+
 ---
 
 ## Architecture
@@ -123,14 +126,14 @@ RentalInsuranceManager ─ optional policies, claims, pool-funded pull settlemen
 Honest view of what's done and what's next:
 
 - ✅ **Category-specific escrow at deploy time** *(done, live)*. The factory selects the agreement implementation by the template's `category` and deploys it as an EIP-1167 clone — see [Per-category agreements via minimal-proxy clones](#per-category-agreements-via-minimal-proxy-clones). Live on Sepolia with all three implementations registered and verified.
-- **Contested-claim arbitration.** Deposit deductions are trust-minimized today (tenant consent or a timeout). A production system would add a neutral arbiter or an escrow-oracle path for disputed claims.
+- ✅ **Contested-claim arbitration** *(done)*. A neutral arbiter resolves disputed deductions, and the tenant can contest a claim within the window to block timeout-approval — see [Contested-claim arbitration](#contested-claim-arbitration). In the codebase and tested; ships to the live factory on the next redeploy.
 - **Insurance wired into the rental flow.** `RentalInsuranceManager` is standalone; a template that `requiresInsurance` could mint/attach a policy as part of `createRentalAgreement`.
 - **Subgraph + richer frontend.** Index `AgreementCreated` events so the demo lists real agreements and their lifecycle, rather than reading one address at a time.
 
 ## Security notes & scope
 
 - Pull payments, checks-effects-interactions, `ReentrancyGuard`, `Pausable`, custom errors, OpenZeppelin `Ownable` v5.
-- **Not audited.** This is a reference/portfolio implementation. Deposit-deduction approval is intentionally trust-minimized (tenant consent or timeout); a production system would likely add a neutral arbiter or an escrow-oracle for contested claims.
+- **Not audited.** This is a reference/portfolio implementation. Deposit deductions settle by tenant consent, a timeout, or — when contested — a neutral arbiter; a production system would likely decentralise that arbiter (a panel, a bonded escrow-oracle, or a Kleros-style court) rather than the single configurable address used here.
 - Operating a real rental-payment platform may trigger money-transmission, insurance-licensing, and local tenancy-law obligations. Get legal review before mainnet.
 
 ## License

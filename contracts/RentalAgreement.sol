@@ -23,6 +23,7 @@ struct RentalInit {
     bool allowsEarlyTermination;
     address platformTreasury;
     address priceFeed;
+    address arbiter; // neutral party that resolves contested deposit deductions
     string tenantDetails;
 }
 
@@ -82,6 +83,8 @@ contract RentalAgreement is Initializable, ReentrancyGuard, Pausable {
         uint256 amount;
         string evidence; // IPFS hash
         bool approved;
+        bool disputed; // tenant contested this claim within the window
+        bool resolved; // settled by the arbiter
         uint256 createdAt;
     }
 
@@ -93,6 +96,7 @@ contract RentalAgreement is Initializable, ReentrancyGuard, Pausable {
     // because EIP-1167 clones run no constructor and cannot carry immutables.
     address public factory;
     address public platformTreasury;
+    address public arbiter;
     IAggregatorV3 public ethUsdPriceFeed;
 
     uint256 public securityDepositHeld;
@@ -108,6 +112,8 @@ contract RentalAgreement is Initializable, ReentrancyGuard, Pausable {
     event LateFeeApplied(uint256 indexed paymentId, uint256 lateFee);
     event DeductionRequested(uint256 indexed deductionId, string reason, uint256 amount);
     event DeductionApproved(uint256 indexed deductionId, uint256 amount);
+    event DeductionDisputed(uint256 indexed deductionId, address indexed tenant, string reason);
+    event DeductionResolved(uint256 indexed deductionId, uint256 toLandlord, uint256 toTenant);
     event SecurityDepositReleased(address indexed tenant, uint256 amount);
     event AgreementStatusChanged(AgreementStatus status, uint256 at);
     event DisputeRaised(address indexed raiser, string reason);
@@ -116,6 +122,7 @@ contract RentalAgreement is Initializable, ReentrancyGuard, Pausable {
     error NotLandlord();
     error NotTenant();
     error NotParty();
+    error NotArbiter();
     error NotFactory();
     error AlreadyFunded();
     error WrongFundingAmount(uint256 expected, uint256 received);
@@ -131,6 +138,10 @@ contract RentalAgreement is Initializable, ReentrancyGuard, Pausable {
     }
     modifier onlyParties() {
         if (msg.sender != agreement.landlord && msg.sender != agreement.tenant) revert NotParty();
+        _;
+    }
+    modifier onlyArbiter() {
+        if (msg.sender != arbiter) revert NotArbiter();
         _;
     }
 
@@ -156,6 +167,7 @@ contract RentalAgreement is Initializable, ReentrancyGuard, Pausable {
 
         factory = msg.sender;
         platformTreasury = init.platformTreasury;
+        arbiter = init.arbiter;
         ethUsdPriceFeed = IAggregatorV3(init.priceFeed);
 
         agreement = AgreementDetails({
@@ -281,6 +293,8 @@ contract RentalAgreement is Initializable, ReentrancyGuard, Pausable {
                 amount: amount,
                 evidence: evidence,
                 approved: false,
+                disputed: false,
+                resolved: false,
                 createdAt: block.timestamp
             })
         );
@@ -289,16 +303,61 @@ contract RentalAgreement is Initializable, ReentrancyGuard, Pausable {
 
     /// @notice Approve a deduction — by the tenant, or by anyone once the 7-day
     ///         dispute window has elapsed without a dispute.
+    /// @dev A disputed claim can no longer be approved this way; only the
+    ///      {arbiter} can settle it via {resolveDeduction}.
     function approveDeduction(uint256 deductionId) external {
         require(deductionId < deductions.length, "bad id");
+        require(!securityDepositReleased, "deposit released");
         Deduction storage d = deductions[deductionId];
-        require(!d.approved, "already approved");
+        require(!d.approved && !d.resolved, "already settled");
+        require(!d.disputed, "disputed - arbiter must resolve");
         require(
             msg.sender == agreement.tenant || block.timestamp >= d.createdAt + DISPUTE_WINDOW,
             "not authorized / window open"
         );
 
         _applyDeduction(deductionId, d.amount);
+        _checkAllDeductionsSettled();
+    }
+
+    /// @notice Tenant contests a specific deduction within the dispute window,
+    ///         blocking the timeout auto-approval and routing it to the arbiter.
+    function disputeDeduction(uint256 deductionId, string calldata reason) external onlyTenant {
+        require(deductionId < deductions.length, "bad id");
+        Deduction storage d = deductions[deductionId];
+        require(!d.approved && !d.resolved, "already settled");
+        require(!d.disputed, "already disputed");
+        require(block.timestamp < d.createdAt + DISPUTE_WINDOW, "window closed");
+
+        d.disputed = true;
+        agreement.status = AgreementStatus.Disputed;
+        emit DeductionDisputed(deductionId, msg.sender, reason);
+        emit DisputeRaised(msg.sender, reason);
+    }
+
+    /// @notice Neutral arbiter settles a contested deduction, awarding part (or
+    ///         all) of the claim to the landlord; the remainder stays in the
+    ///         deposit and is refunded to the tenant at release.
+    /// @param awardToLandlord Portion of the claimed amount granted to the landlord.
+    function resolveDeduction(uint256 deductionId, uint256 awardToLandlord) external onlyArbiter {
+        require(deductionId < deductions.length, "bad id");
+        require(!securityDepositReleased, "deposit released");
+        Deduction storage d = deductions[deductionId];
+        require(d.disputed, "not disputed");
+        require(!d.resolved && !d.approved, "already settled");
+        require(awardToLandlord <= d.amount, "over claim");
+
+        uint256 available = securityDepositHeld - securityDepositDeducted;
+        if (awardToLandlord > available) awardToLandlord = available;
+
+        d.resolved = true;
+        d.approved = awardToLandlord == d.amount; // marks the claim fully upheld
+        if (awardToLandlord > 0) {
+            securityDepositDeducted += awardToLandlord;
+            pendingWithdrawals[agreement.landlord] += awardToLandlord;
+        }
+
+        emit DeductionResolved(deductionId, awardToLandlord, d.amount - awardToLandlord);
         _checkAllDeductionsSettled();
     }
 
@@ -364,7 +423,8 @@ contract RentalAgreement is Initializable, ReentrancyGuard, Pausable {
 
     function _checkAllDeductionsSettled() internal {
         for (uint256 i = 0; i < deductions.length; i++) {
-            if (!deductions[i].approved) return;
+            // A claim is settled once approved or resolved by the arbiter.
+            if (!deductions[i].approved && !deductions[i].resolved) return;
         }
         _releaseDeposit();
     }

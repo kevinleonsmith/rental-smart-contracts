@@ -51,6 +51,10 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
     address public platformTreasury;
     address public immutable priceFeed;
 
+    /// @notice Neutral party written into each new agreement to resolve contested
+    ///         deposit deductions. Defaults to the deployer; owner can update it.
+    address public arbiter;
+
     /// @notice Per-category agreement implementation to clone (EIP-1167).
     ///         e.g. "vehicle" => VehicleRentalAgreement implementation address.
     mapping(string => address) public implementationOf;
@@ -69,6 +73,7 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
     event TreasuryUpdated(address treasury);
     event ImplementationSet(string category, address implementation);
     event DefaultImplementationSet(address implementation);
+    event ArbiterUpdated(address arbiter);
 
     error InvalidTemplate();
     error InvalidProperty();
@@ -79,6 +84,7 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
         require(_platformTreasury != address(0), "zero treasury");
         priceFeed = _priceFeed;
         platformTreasury = _platformTreasury;
+        arbiter = msg.sender; // deployer arbitrates until a dedicated one is set
         // Deploy a base implementation so every category has a working default
         // to clone out of the box; category-specific impls can be registered later.
         defaultImplementation = address(new RentalAgreement());
@@ -103,6 +109,14 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
         require(implementation != address(0), "zero impl");
         defaultImplementation = implementation;
         emit DefaultImplementationSet(implementation);
+    }
+
+    /// @notice Update the arbiter written into future agreements.
+    /// @dev Does not affect already-deployed agreements, which keep their arbiter.
+    function setArbiter(address newArbiter) external onlyOwner {
+        require(newArbiter != address(0), "zero arbiter");
+        arbiter = newArbiter;
+        emit ArbiterUpdated(newArbiter);
     }
 
     /// @notice Resolve the implementation that would be cloned for a category.
@@ -257,6 +271,7 @@ contract RentalAgreementFactory is Ownable, Pausable, ReentrancyGuard {
                 allowsEarlyTermination: t.allowsEarlyTermination,
                 platformTreasury: platformTreasury,
                 priceFeed: priceFeed,
+                arbiter: arbiter,
                 tenantDetails: tenantDetails
             })
         );
