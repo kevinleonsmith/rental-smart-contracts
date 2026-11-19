@@ -1,5 +1,7 @@
 # Rental Smart Contracts
 
+[![CI](https://github.com/kevinleonsmith/rental-smart-contracts/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinleonsmith/rental-smart-contracts/actions/workflows/ci.yml)
+
 On-chain rental agreements with **escrowed security deposits**, automated fees, and a dispute window — built on a **factory pattern** so a single platform can issue agreements for property, vehicle, and yacht rentals and collect a fee on each.
 
 Written in Solidity `0.8.24`, tested with Hardhat, built on OpenZeppelin v5.
